@@ -26,7 +26,7 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 		switch src.Kind() {
 		case reflect.String:
 			dst.Elem().SetString(x.ConcealMessage)
-		case reflect.Array, reflect.Slice:
+		case reflect.Array, reflect.Slice, reflect.Map:
 			dst = dst.Elem()
 		}
 		return adjustValue(dst)

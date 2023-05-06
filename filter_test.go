@@ -196,3 +196,27 @@ func TestFilterWithPrefixForMap(t *testing.T) {
 		t.Errorf("Failed to filter: %s", buf.String())
 	}
 }
+
+func TestFilterWithTagForCustomType(t *testing.T) {
+	type myRecord struct {
+		Data map[string]string `masq:"secret"`
+	}
+	record := myRecord{
+		Data: map[string]string{
+			"phone": "090-0000-0000",
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.HandlerOptions{
+		ReplaceAttr: masq.New(
+			masq.WithTag("secret"),
+		),
+	}.NewJSONHandler(&buf))
+
+	logger.With("record", record).Info("Got record")
+	if strings.Contains(buf.String(), "090-0000-0000") {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
+
+}
