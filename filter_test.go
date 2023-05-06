@@ -1,9 +1,12 @@
 package masq_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"regexp"
+	"strings"
+	"testing"
 
 	"github.com/m-mizutani/masq"
 	"golang.org/x/exp/slog"
@@ -166,4 +169,30 @@ func ExampleWithFieldPrefix() {
 	out.Flush()
 	// Output:
 	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","SecurePhone":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
+}
+
+func TestFilterWithPrefixForMap(t *testing.T) {
+	type myRecord struct {
+		Data map[string]string
+	}
+	record := myRecord{
+		Data: map[string]string{
+			"secure_phone": "090-0000-0000",
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.HandlerOptions{
+		ReplaceAttr: masq.New(
+			masq.WithFieldPrefix("secure_"),
+		),
+	}.NewJSONHandler(&buf))
+
+	logger.With("record", record).Info("Got record")
+	if !strings.Contains(buf.String(), "[FILTERED]") {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "090-0000-0000") {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
 }
