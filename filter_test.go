@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/masq"
 	"golang.org/x/exp/slog"
@@ -219,4 +221,26 @@ func TestFilterWithTagForCustomType(t *testing.T) {
 		t.Errorf("Failed to filter: %s", buf.String())
 	}
 
+}
+
+func TestAllowedType(t *testing.T) {
+	type myRecord struct {
+		Time time.Time
+	}
+	now := time.Now().Add(-time.Hour * 24)
+	record := myRecord{
+		Time: now,
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.HandlerOptions{
+		ReplaceAttr: masq.New(
+			masq.WithAllowedType(reflect.TypeOf(time.Time{})),
+		),
+	}.NewJSONHandler(&buf))
+
+	logger.With("record", record).Info("Got record")
+	if !strings.Contains(buf.String(), now.Format(time.RFC3339Nano)) {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
 }

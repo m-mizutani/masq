@@ -14,6 +14,7 @@ const (
 type masq struct {
 	ConcealMessage string
 	filters        Filters
+	allowedTypes   map[reflect.Type]struct{}
 }
 
 type Option func(m *masq)
@@ -21,6 +22,7 @@ type Option func(m *masq)
 func newMasq(options ...Option) *masq {
 	m := &masq{
 		ConcealMessage: DefaultConcealMessage,
+		allowedTypes:   map[reflect.Type]struct{}{},
 	}
 
 	for _, opt := range options {
@@ -89,5 +91,13 @@ func WithFieldName(fieldName string) Option {
 func WithFieldPrefix(fieldName string) Option {
 	return func(m *masq) {
 		m.filters = append(m.filters, newFieldPrefixFilter(fieldName))
+	}
+}
+
+func WithAllowedType(types ...reflect.Type) Option {
+	return func(m *masq) {
+		for _, t := range types {
+			m.allowedTypes[t] = struct{}{}
+		}
 	}
 }

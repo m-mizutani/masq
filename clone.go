@@ -3,6 +3,10 @@ package masq
 import "reflect"
 
 func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.Value {
+	if _, ok := x.allowedTypes[value.Type()]; ok {
+		return value
+	}
+
 	adjustValue := func(ret reflect.Value) reflect.Value {
 		switch value.Kind() {
 		case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Array:
