@@ -5,5 +5,5 @@ func NewMasq(options ...Option) *masq {
 }
 
 func (x *masq) Conceal(v any) any {
-	return x.conceal(v)
+	return x.conceal("", v)
 }
