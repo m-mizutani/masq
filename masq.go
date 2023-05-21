@@ -32,8 +32,8 @@ func newMasq(options ...Option) *masq {
 	return m
 }
 
-func (x *masq) conceal(v any) any {
-	copied := x.clone("", reflect.ValueOf(v), "")
+func (x *masq) conceal(k string, v any) any {
+	copied := x.clone(k, reflect.ValueOf(v), "")
 	return copied.Interface()
 }
 
@@ -41,7 +41,7 @@ func New(options ...Option) func(groups []string, a slog.Attr) slog.Attr {
 	m := newMasq(options...)
 
 	return func(groups []string, attr slog.Attr) slog.Attr {
-		masked := m.conceal(attr.Value.Any())
+		masked := m.conceal(attr.Key, attr.Value.Any())
 		return slog.Any(attr.Key, masked)
 	}
 }
