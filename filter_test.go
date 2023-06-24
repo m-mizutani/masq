@@ -3,6 +3,7 @@ package masq_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"reflect"
 	"regexp"
@@ -13,6 +14,12 @@ import (
 	"github.com/m-mizutani/masq"
 	"golang.org/x/exp/slog"
 )
+
+func newLogger(w io.Writer, f func(groups []string, a slog.Attr) slog.Attr) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{
+		ReplaceAttr: f,
+	}))
+}
 
 type fixedTimeWriter struct {
 	buf []byte
@@ -53,9 +60,7 @@ func ExampleWithType() {
 		Password: "abcd1234",
 	}
 
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(masq.WithType[password]()),
-	}.NewJSONHandler(out))
+	logger := newLogger(out, masq.New(masq.WithType[password]()))
 
 	logger.With("record", record).Info("Got record")
 	out.Flush()
@@ -69,9 +74,7 @@ func ExampleWithString() {
 	const issuedToken = "abcd1234"
 	authHeader := "Authorization: Bearer " + issuedToken
 
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(masq.WithString("abcd1234")),
-	}.NewJSONHandler(out))
+	logger := newLogger(out, masq.New(masq.WithString("abcd1234")))
 
 	logger.With("auth", authHeader).Info("send header")
 	out.Flush()
@@ -91,11 +94,9 @@ func ExampleWithRegex() {
 		Phone: "090-0000-0000",
 	}
 
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(
-			masq.WithRegex(regexp.MustCompile(`^\d{3}-\d{4}-\d{4}$`)),
-		),
-	}.NewJSONHandler(out))
+	logger := newLogger(out, masq.New(
+		masq.WithRegex(regexp.MustCompile(`^\d{3}-\d{4}-\d{4}$`)),
+	))
 
 	logger.With("record", record).Info("Got record")
 	out.Flush()
@@ -115,9 +116,7 @@ func ExampleWithTag() {
 		EMail: "mizutani@hey.com",
 	}
 
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(masq.WithTag("secret")),
-	}.NewJSONHandler(out))
+	logger := newLogger(out, masq.New(masq.WithTag("secret")))
 
 	logger.With("record", record).Info("Got record")
 	out.Flush()
@@ -136,12 +135,7 @@ func ExampleWithFieldName() {
 		ID:    "m-mizutani",
 		Phone: "090-0000-0000",
 	}
-
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(
-			masq.WithFieldName("Phone"),
-		),
-	}.NewJSONHandler(out))
+	logger := newLogger(out, masq.New(masq.WithFieldName("Phone")))
 
 	logger.With("record", record).Info("Got record")
 	out.Flush()
@@ -161,11 +155,7 @@ func ExampleWithFieldPrefix() {
 		SecurePhone: "090-0000-0000",
 	}
 
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(
-			masq.WithFieldPrefix("Secure"),
-		),
-	}.NewJSONHandler(out))
+	logger := newLogger(out, masq.New(masq.WithFieldPrefix("Secure")))
 
 	logger.With("record", record).Info("Got record")
 	out.Flush()
@@ -184,11 +174,7 @@ func TestFilterWithPrefixForMap(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(
-			masq.WithFieldPrefix("secure_"),
-		),
-	}.NewJSONHandler(&buf))
+	logger := newLogger(&buf, masq.New(masq.WithFieldPrefix("secure_")))
 
 	logger.With("record", record).Info("Got record")
 	if !strings.Contains(buf.String(), "[FILTERED]") {
@@ -210,11 +196,7 @@ func TestFilterWithTagForCustomType(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(
-			masq.WithTag("secret"),
-		),
-	}.NewJSONHandler(&buf))
+	logger := newLogger(&buf, masq.New(masq.WithTag("secret")))
 
 	logger.With("record", record).Info("Got record")
 	if strings.Contains(buf.String(), "090-0000-0000") {
@@ -233,11 +215,7 @@ func TestAllowedType(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	logger := slog.New(slog.HandlerOptions{
-		ReplaceAttr: masq.New(
-			masq.WithAllowedType(reflect.TypeOf(time.Time{})),
-		),
-	}.NewJSONHandler(&buf))
+	logger := newLogger(&buf, masq.New(masq.WithAllowedType(reflect.TypeOf(time.Time{}))))
 
 	logger.With("record", record).Info("Got record")
 	if !strings.Contains(buf.String(), now.Format(time.RFC3339Nano)) {
