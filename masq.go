@@ -8,21 +8,21 @@ import (
 )
 
 const (
-	DefaultConcealMessage = "[FILTERED]"
+	DefaultRedactMessage = "[REDACTED]"
 )
 
 type masq struct {
-	ConcealMessage string
-	filters        Filters
-	allowedTypes   map[reflect.Type]struct{}
+	RedactMessage string
+	filters       Filters
+	allowedTypes  map[reflect.Type]struct{}
 }
 
 type Option func(m *masq)
 
 func newMasq(options ...Option) *masq {
 	m := &masq{
-		ConcealMessage: DefaultConcealMessage,
-		allowedTypes:   map[reflect.Type]struct{}{},
+		RedactMessage: DefaultRedactMessage,
+		allowedTypes:  map[reflect.Type]struct{}{},
 	}
 
 	for _, opt := range options {
@@ -32,7 +32,7 @@ func newMasq(options ...Option) *masq {
 	return m
 }
 
-func (x *masq) conceal(k string, v any) any {
+func (x *masq) redact(k string, v any) any {
 	copied := x.clone(k, reflect.ValueOf(v), "")
 	return copied.Interface()
 }
@@ -41,14 +41,14 @@ func New(options ...Option) func(groups []string, a slog.Attr) slog.Attr {
 	m := newMasq(options...)
 
 	return func(groups []string, attr slog.Attr) slog.Attr {
-		masked := m.conceal(attr.Key, attr.Value.Any())
+		masked := m.redact(attr.Key, attr.Value.Any())
 		return slog.Any(attr.Key, masked)
 	}
 }
 
-func WithConcealMessage(msg string) Option {
+func WithRedactMessage(msg string) Option {
 	return func(m *masq) {
-		m.ConcealMessage = msg
+		m.RedactMessage = msg
 	}
 }
 
@@ -60,13 +60,13 @@ func WithFilter(filter Filter) Option {
 
 func WithString(target string) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newStringFilter(target, m.ConcealMessage))
+		m.filters = append(m.filters, newStringFilter(target, m.RedactMessage))
 	}
 }
 
 func WithRegex(target *regexp.Regexp) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newRegexFilter(target, m.ConcealMessage))
+		m.filters = append(m.filters, newRegexFilter(target, m.RedactMessage))
 	}
 }
 

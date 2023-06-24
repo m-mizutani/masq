@@ -14,7 +14,7 @@ func (x *allFieldFilter) ReplaceString(s string) string {
 	return s
 }
 
-func (x *allFieldFilter) ShouldConceal(fieldName string, value interface{}, tag string) bool {
+func (x *allFieldFilter) ShouldRedact(fieldName string, value interface{}, tag string) bool {
 	return fieldName != ""
 }
 
@@ -22,8 +22,8 @@ func TestClone(t *testing.T) {
 	c := masq.NewMasq(masq.WithString("blue"))
 
 	t.Run("string", func(t *testing.T) {
-		v := gt.MustCast[string](t, c.Conceal("blue is blue")).NotNil()
-		gt.V(t, v).Equal(masq.DefaultConcealMessage + " is " + masq.DefaultConcealMessage)
+		v := gt.MustCast[string](t, c.Redact("blue is blue")).NotNil()
+		gt.V(t, v).Equal(masq.DefaultRedactMessage + " is " + masq.DefaultRedactMessage)
 	})
 
 	t.Run("struct", func(t *testing.T) {
@@ -39,10 +39,10 @@ func TestClone(t *testing.T) {
 				Name:  "blue",
 				Label: "five",
 			}
-			copied := gt.MustCast[*testData](t, c.Conceal(data)).NotNil()
+			copied := gt.MustCast[*testData](t, c.Redact(data)).NotNil()
 
 			gt.V(t, copied).NotNil()
-			gt.Value(t, masq.DefaultConcealMessage).Equal(copied.Name)
+			gt.Value(t, masq.DefaultRedactMessage).Equal(copied.Name)
 			gt.Value(t, data.Name).Equal("blue")
 			gt.Value(t, data.Label).Equal("five")
 			gt.Value(t, copied.Label).Equal("five")
@@ -54,8 +54,8 @@ func TestClone(t *testing.T) {
 				Name:  "blue",
 				Label: "five",
 			}
-			copied := gt.MustCast[testData](t, c.Conceal(data)).NotNil()
-			gt.V(t, copied.Name).Equal(masq.DefaultConcealMessage)
+			copied := gt.MustCast[testData](t, c.Redact(data)).NotNil()
+			gt.V(t, copied.Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied.Label).Equal("five")
 		})
 
@@ -70,8 +70,8 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[*testDataParent](t, c.Conceal(data)).NotNil()
-			gt.V(t, copied.Child.Name).Equal(masq.DefaultConcealMessage)
+			copied := gt.MustCast[*testDataParent](t, c.Redact(data)).NotNil()
+			gt.V(t, copied.Child.Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied.Child.Label).Equal("five")
 		})
 
@@ -82,9 +82,9 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[map[string]*testData](t, c.Conceal(data)).NotNil()
+			copied := gt.MustCast[map[string]*testData](t, c.Redact(data)).NotNil()
 
-			gt.V(t, copied["xyz"].Name).Equal(masq.DefaultConcealMessage)
+			gt.V(t, copied["xyz"].Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied["xyz"].Label).Equal("five")
 		})
 
@@ -99,9 +99,9 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[[]testData](t, c.Conceal(data)).NotNil()
+			copied := gt.MustCast[[]testData](t, c.Redact(data)).NotNil()
 			gt.V(t, copied[0].Name).Equal("orange")
-			gt.V(t, copied[1].Name).Equal(masq.DefaultConcealMessage)
+			gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied[1].Label).Equal("five")
 		})
 
@@ -116,9 +116,9 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[[]*testData](t, c.Conceal(data)).NotNil()
+			copied := gt.MustCast[[]*testData](t, c.Redact(data)).NotNil()
 			gt.V(t, copied[0].Name).Equal("orange")
-			gt.V(t, copied[1].Name).Equal(masq.DefaultConcealMessage)
+			gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied[1].Label).Equal("five")
 		})
 
@@ -130,8 +130,8 @@ func TestClone(t *testing.T) {
 			data := &myData{
 				Name: "miss blue",
 			}
-			copied := gt.MustCast[*myData](t, c.Conceal(data)).NotNil()
-			gt.V(t, copied.Name).Equal(myType("miss " + masq.DefaultConcealMessage))
+			copied := gt.MustCast[*myData](t, c.Redact(data)).NotNil()
+			gt.V(t, copied.Name).Equal(myType("miss " + masq.DefaultRedactMessage))
 		})
 
 		t.Run("unexported field is not copied", func(t *testing.T) {
@@ -144,7 +144,7 @@ func TestClone(t *testing.T) {
 				unexported: "red",
 				Exported:   "orange",
 			}
-			copied := gt.MustCast[*myStruct](t, c.Conceal(data)).NotNil()
+			copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
 			gt.V(t, copied.unexported).NotEqual("red")
 			gt.V(t, copied.Exported).Equal("orange")
 		})
@@ -166,7 +166,7 @@ func TestClone(t *testing.T) {
 				Bytes: []byte("timeless"),
 				Child: nil,
 			}
-			copied := gt.MustCast[*myStruct](t, c.Conceal(data)).NotNil()
+			copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
 
 			// function type is not comparable, but it's ok if not nil
 			gt.V(t, copied.Func).NotNil()
@@ -209,7 +209,7 @@ func TestClone(t *testing.T) {
 			ChildPtr:  &child{Data: "y"},
 		}
 
-		copied := gt.MustCast[*myStruct](t, mask.Conceal(data)).NotNil()
+		copied := gt.MustCast[*myStruct](t, mask.Redact(data)).NotNil()
 
 		gt.Value(t, copied.Func).Nil()
 		gt.Value(t, copied.Chan).Nil()

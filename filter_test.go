@@ -65,7 +65,7 @@ func ExampleWithType() {
 	logger.With("record", record).Info("Got record")
 	out.Flush()
 	// Output:
-	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","Password":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
+	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","Password":"[REDACTED]"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
 func ExampleWithString() {
@@ -79,7 +79,7 @@ func ExampleWithString() {
 	logger.With("auth", authHeader).Info("send header")
 	out.Flush()
 	// Output:
-	// {"auth":"Authorization: Bearer [FILTERED]","level":"INFO","msg":"send header","time":"2022-12-25T09:00:00.123456789"}
+	// {"auth":"Authorization: Bearer [REDACTED]","level":"INFO","msg":"send header","time":"2022-12-25T09:00:00.123456789"}
 }
 
 func ExampleWithRegex() {
@@ -101,7 +101,7 @@ func ExampleWithRegex() {
 	logger.With("record", record).Info("Got record")
 	out.Flush()
 	// Output:
-	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","Phone":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
+	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","Phone":"[REDACTED]"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
 func ExampleWithTag() {
@@ -121,7 +121,7 @@ func ExampleWithTag() {
 	logger.With("record", record).Info("Got record")
 	out.Flush()
 	// Output:
-	// {"level":"INFO","msg":"Got record","record":{"EMail":"[FILTERED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
+	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
 func ExampleWithFieldName() {
@@ -140,7 +140,7 @@ func ExampleWithFieldName() {
 	logger.With("record", record).Info("Got record")
 	out.Flush()
 	// Output:
-	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","Phone":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
+	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","Phone":"[REDACTED]"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
 func ExampleWithFieldPrefix() {
@@ -160,7 +160,7 @@ func ExampleWithFieldPrefix() {
 	logger.With("record", record).Info("Got record")
 	out.Flush()
 	// Output:
-	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","SecurePhone":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
+	// {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","SecurePhone":"[REDACTED]"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
 func TestFilterWithPrefixForMap(t *testing.T) {
@@ -177,7 +177,7 @@ func TestFilterWithPrefixForMap(t *testing.T) {
 	logger := newLogger(&buf, masq.New(masq.WithFieldPrefix("secure_")))
 
 	logger.With("record", record).Info("Got record")
-	if !strings.Contains(buf.String(), "[FILTERED]") {
+	if !strings.Contains(buf.String(), "[REDACTED]") {
 		t.Errorf("Failed to filter: %s", buf.String())
 	}
 	if strings.Contains(buf.String(), "090-0000-0000") {
