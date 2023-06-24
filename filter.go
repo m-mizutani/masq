@@ -10,8 +10,8 @@ type Filter interface {
 	// ReplaceString is called when checking string type. The argument is the value to be checked, and the return value should be the value to be replaced. If nothing needs to be done, the method should return the argument as is. This method is intended for the case where you want to hide a part of a string.
 	ReplaceString(s string) string
 
-	// ShouldConceal is called for all values to be checked. The field name of the value to be checked, the value to be checked, and tag value if the structure has `zlog` tag will be passed as arguments. If the return value is false, nothing is done; if it is true, the entire field is hidden. Hidden values will be replaced with the value "[filtered]" if string type. For other type, empty value will be set.
-	ShouldConceal(fieldName string, value any, tag string) bool
+	// ShouldRedact is called for all values to be checked. The field name of the value to be checked, the value to be checked, and tag value if the structure has `zlog` tag will be passed as arguments. If the return value is false, nothing is done; if it is true, the entire field is hidden. Hidden values will be replaced with the value "[filtered]" if string type. For other type, empty value will be set.
+	ShouldRedact(fieldName string, value any, tag string) bool
 }
 
 type Filters []Filter
@@ -23,9 +23,9 @@ func (x Filters) ReplaceString(s string) string {
 	return s
 }
 
-func (x Filters) ShouldConceal(fieldName string, value any, tag string) bool {
+func (x Filters) ShouldRedact(fieldName string, value any, tag string) bool {
 	for _, f := range x {
-		if f.ShouldConceal(fieldName, value, tag) {
+		if f.ShouldRedact(fieldName, value, tag) {
 			return true
 		}
 	}
@@ -49,7 +49,7 @@ func (x *stringFilter) ReplaceString(s string) string {
 	return strings.ReplaceAll(s, x.target, x.replaced)
 }
 
-func (x *stringFilter) ShouldConceal(_ string, _ any, _ string) bool {
+func (x *stringFilter) ShouldRedact(_ string, _ any, _ string) bool {
 	return false
 }
 
@@ -70,7 +70,7 @@ func (x *regexFilter) ReplaceString(s string) string {
 	return x.target.ReplaceAllString(s, x.replaced)
 }
 
-func (x *regexFilter) ShouldConceal(_ string, _ any, _ string) bool {
+func (x *regexFilter) ShouldRedact(_ string, _ any, _ string) bool {
 	return false
 }
 
@@ -90,7 +90,7 @@ func (x *typeFilter[T]) ReplaceString(s string) string {
 	return s
 }
 
-func (x *typeFilter[T]) ShouldConceal(_ string, v any, _ string) bool {
+func (x *typeFilter[T]) ShouldRedact(_ string, v any, _ string) bool {
 	return x.target == reflect.TypeOf(v)
 }
 
@@ -109,7 +109,7 @@ func (x *tagFilter) ReplaceString(s string) string {
 	return s
 }
 
-func (x *tagFilter) ShouldConceal(_ string, _ any, tag string) bool {
+func (x *tagFilter) ShouldRedact(_ string, _ any, tag string) bool {
 	return x.target == tag
 }
 
@@ -128,7 +128,7 @@ func (x *fieldNameFilter) ReplaceString(s string) string {
 	return s
 }
 
-func (x *fieldNameFilter) ShouldConceal(fieldName string, _ any, _ string) bool {
+func (x *fieldNameFilter) ShouldRedact(fieldName string, _ any, _ string) bool {
 	return x.target == fieldName
 }
 
@@ -147,6 +147,6 @@ func (x *fieldPrefixFilter) ReplaceString(s string) string {
 	return s
 }
 
-func (x *fieldPrefixFilter) ShouldConceal(fieldName string, _ any, _ string) bool {
+func (x *fieldPrefixFilter) ShouldRedact(fieldName string, _ any, _ string) bool {
 	return strings.HasPrefix(fieldName, x.target)
 }

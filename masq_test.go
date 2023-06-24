@@ -18,9 +18,9 @@ func Example() {
 		Email: "mizutani@hey.com",
 	}
 
-	logger := slog.New(slog.HandlerOptions{
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		ReplaceAttr: masq.New(masq.WithType[EmailAddr]()),
-	}.NewJSONHandler(os.Stdout))
+	}))
 
 	logger.Info("hello", slog.Any("user", u))
 }

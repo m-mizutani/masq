@@ -25,11 +25,11 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 	}
 
 	var dst reflect.Value
-	if x.filters.ShouldConceal(fieldName, src.Interface(), tag) {
+	if x.filters.ShouldRedact(fieldName, src.Interface(), tag) {
 		dst = reflect.New(src.Type())
 		switch src.Kind() {
 		case reflect.String:
-			dst.Elem().SetString(x.ConcealMessage)
+			dst.Elem().SetString(x.RedactMessage)
 		case reflect.Array, reflect.Slice, reflect.Map:
 			dst = dst.Elem()
 		}
