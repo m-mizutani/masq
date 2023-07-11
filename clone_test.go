@@ -26,6 +26,10 @@ func TestClone(t *testing.T) {
 		gt.V(t, v).Equal(masq.DefaultRedactMessage + " is " + masq.DefaultRedactMessage)
 	})
 
+	t.Run("nil", func(t *testing.T) {
+		gt.V(t, c.Redact(nil)).Nil()
+	})
+
 	t.Run("struct", func(t *testing.T) {
 		type testData struct {
 			ID    int
