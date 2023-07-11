@@ -33,6 +33,9 @@ func newMasq(options ...Option) *masq {
 }
 
 func (x *masq) redact(k string, v any) any {
+	if v == nil {
+		return nil
+	}
 	copied := x.clone(k, reflect.ValueOf(v), "")
 	return copied.Interface()
 }
