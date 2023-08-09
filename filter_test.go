@@ -11,8 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"log/slog"
+
 	"github.com/m-mizutani/masq"
-	"golang.org/x/exp/slog"
 )
 
 func newLogger(w io.Writer, f func(groups []string, a slog.Attr) slog.Attr) *slog.Logger {
