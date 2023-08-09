@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"regexp"
 
-	"golang.org/x/exp/slog"
+	"log/slog"
 )
 
 const (

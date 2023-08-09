@@ -3,8 +3,9 @@ package masq_test
 import (
 	"os"
 
+	"log/slog"
+
 	"github.com/m-mizutani/masq"
-	"golang.org/x/exp/slog"
 )
 
 type EmailAddr string
