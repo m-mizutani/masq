@@ -1,6 +1,9 @@
 package masq
 
-import "reflect"
+import (
+	"reflect"
+	"unsafe"
+)
 
 func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.Value {
 	if _, ok := x.allowedTypes[value.Type()]; ok {
@@ -48,12 +51,19 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
-			fv := src.Field(i)
-			if !fv.CanInterface() {
-				continue
+			srcValue := src.Field(i)
+			dstValue := dst.Elem().Field(i)
+
+			if !srcValue.CanInterface() {
+				if !srcValue.CanAddr() {
+					continue
+				}
+
+				srcValue = reflect.NewAt(srcValue.Type(), unsafe.Pointer(srcValue.UnsafeAddr())).Elem()
+				dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
 			}
 
-			dst.Elem().Field(i).Set(x.clone(f.Name, fv, f.Tag.Get("masq")))
+			dstValue.Set(x.clone(f.Name, srcValue, f.Tag.Get("masq")))
 		}
 
 	case reflect.Map:
@@ -64,8 +74,19 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 			dst.SetMapIndex(keys[i], x.clone(keys[i].String(), mValue, ""))
 		}
 
-	case reflect.Array, reflect.Slice:
+	case reflect.Slice:
 		dst = reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
+		for i := 0; i < src.Len(); i++ {
+			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
+		}
+
+	case reflect.Array:
+		if src.Len() == 0 {
+			return src // can not access to src.Index(0)
+		}
+
+		arrType := reflect.ArrayOf(src.Len(), src.Index(0).Type())
+		dst = reflect.New(arrType).Elem()
 		for i := 0; i < src.Len(); i++ {
 			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
 		}
