@@ -268,3 +268,21 @@ func TestCloneUnexportedPointer(t *testing.T) {
 	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
 	gt.V(t, copied.c.Name).Equal("orange")
 }
+
+func TestDoublePointer(t *testing.T) {
+	c := masq.NewMasq(masq.WithString("blue"))
+	type child struct {
+		Name string
+	}
+	type myStruct struct {
+		c **child
+	}
+	childData := &child{
+		Name: "orange",
+	}
+	data := &myStruct{
+		c: &childData,
+	}
+	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+	gt.V(t, (*copied.c).Name).Equal("orange")
+}
