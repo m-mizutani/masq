@@ -160,15 +160,18 @@ func TestClone(t *testing.T) {
 				Chan      chan int
 				Bool      bool
 				Bytes     []byte
+				Array     [2]string
 				Interface interface{}
 				Child     *child
 			}
 			data := &myStruct{
-				Func:  time.Now,
-				Chan:  make(chan int),
-				Bool:  true,
-				Bytes: []byte("timeless"),
-				Child: nil,
+				Func:      time.Now,
+				Chan:      make(chan int),
+				Bool:      true,
+				Bytes:     []byte("timeless"),
+				Array:     [2]string{"aa", "bb"},
+				Interface: &struct{}{},
+				Child:     nil,
 			}
 			copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
 
@@ -177,8 +180,9 @@ func TestClone(t *testing.T) {
 			gt.V(t, copied.Chan).Equal(data.Chan)
 			gt.V(t, copied.Bool).Equal(data.Bool)
 			gt.V(t, copied.Bytes).Equal(data.Bytes)
+			gt.V(t, copied.Array).Equal(data.Array)
+			gt.V(t, copied.Interface).Equal(data.Interface)
 		})
-
 	})
 
 	t.Run("filter various type", func(t *testing.T) {
@@ -222,6 +226,63 @@ func TestClone(t *testing.T) {
 		gt.Value(t, copied.StrsPtr).Nil()
 		gt.Value(t, copied.Interface).Nil()
 		gt.Value(t, copied.Child.Data).Equal("")
-		gt.Value(t, copied.ChildPtr.Data).Equal("")
+		gt.Value(t, copied.ChildPtr).Nil()
 	})
+}
+
+func TestMapData(t *testing.T) {
+	c := masq.NewMasq(masq.WithString("blue"))
+
+	type testData struct {
+		ID    int
+		Name  string
+		Label string
+	}
+
+	data := map[string]*testData{
+		"xyz": {
+			Name:  "blue",
+			Label: "five",
+		},
+	}
+	copied := gt.MustCast[map[string]*testData](t, c.Redact(data)).NotNil()
+
+	gt.V(t, copied["xyz"].Name).Equal(masq.DefaultRedactMessage)
+	gt.V(t, copied["xyz"].Label).Equal("five")
+
+}
+
+func TestCloneUnexportedPointer(t *testing.T) {
+	c := masq.NewMasq(masq.WithString("blue"))
+	type child struct {
+		Name string
+	}
+	type myStruct struct {
+		c *child
+	}
+	data := &myStruct{
+		c: &child{
+			Name: "orange",
+		},
+	}
+	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+	gt.V(t, copied.c.Name).Equal("orange")
+}
+
+func TestDoublePointer(t *testing.T) {
+	c := masq.NewMasq(masq.WithString("blue"))
+	type child struct {
+		Name string
+	}
+	type myStruct struct {
+		c **child
+	}
+	childData := &child{
+		Name: "orange",
+	}
+	data := &myStruct{
+		c: &childData,
+	}
+	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+	gt.V(t, (*copied.c).Name).Equal("orange")
 }

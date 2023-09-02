@@ -10,43 +10,35 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 		return value
 	}
 
-	adjustValue := func(ret reflect.Value) reflect.Value {
-		switch value.Kind() {
-		case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Array:
-			return ret
-		default:
-			return ret.Elem()
-		}
-	}
-
 	src := value
 	if value.Kind() == reflect.Ptr {
 		if value.IsNil() {
 			return reflect.New(value.Type()).Elem()
 		}
-		src = value.Elem()
 	}
 
-	var dst reflect.Value
 	if x.filters.ShouldRedact(fieldName, src.Interface(), tag) {
-		dst = reflect.New(src.Type())
+		dst := reflect.New(src.Type())
 		switch src.Kind() {
 		case reflect.String:
 			dst.Elem().SetString(x.RedactMessage)
-		case reflect.Array, reflect.Slice, reflect.Map:
-			dst = dst.Elem()
 		}
-		return adjustValue(dst)
+
+		if !dst.CanInterface() {
+			return dst
+		}
+		return dst.Elem()
 	}
 
 	switch src.Kind() {
 	case reflect.String:
-		dst = reflect.New(src.Type())
+		dst := reflect.New(src.Type())
 		filtered := x.filters.ReplaceString(value.String())
 		dst.Elem().SetString(filtered)
+		return dst.Elem()
 
 	case reflect.Struct:
-		dst = reflect.New(src.Type())
+		dst := reflect.New(src.Type())
 		t := src.Type()
 
 		for i := 0; i < t.NumField(); i++ {
@@ -63,22 +55,27 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 				dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
 			}
 
-			dstValue.Set(x.clone(f.Name, srcValue, f.Tag.Get("masq")))
+			tagValue := f.Tag.Get("masq")
+			copied := x.clone(f.Name, srcValue, tagValue)
+			dstValue.Set(copied)
 		}
+		return dst.Elem()
 
 	case reflect.Map:
-		dst = reflect.MakeMap(src.Type())
+		dst := reflect.MakeMap(src.Type())
 		keys := src.MapKeys()
 		for i := 0; i < src.Len(); i++ {
 			mValue := src.MapIndex(keys[i])
 			dst.SetMapIndex(keys[i], x.clone(keys[i].String(), mValue, ""))
 		}
+		return dst
 
 	case reflect.Slice:
-		dst = reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
+		dst := reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
 		for i := 0; i < src.Len(); i++ {
 			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
 		}
+		return dst
 
 	case reflect.Array:
 		if src.Len() == 0 {
@@ -86,15 +83,21 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 		}
 
 		arrType := reflect.ArrayOf(src.Len(), src.Index(0).Type())
-		dst = reflect.New(arrType).Elem()
+		dst := reflect.New(arrType).Elem()
 		for i := 0; i < src.Len(); i++ {
 			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
 		}
+		return dst
+
+	case reflect.Ptr:
+		dst := reflect.New(src.Elem().Type())
+		copied := x.clone(fieldName, src.Elem(), tag)
+		dst.Elem().Set(copied)
+		return dst
 
 	default:
-		dst = reflect.New(src.Type())
+		dst := reflect.New(src.Type())
 		dst.Elem().Set(src)
+		return dst.Elem()
 	}
-
-	return adjustValue(dst)
 }
