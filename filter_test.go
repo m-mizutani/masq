@@ -223,3 +223,48 @@ func TestAllowedType(t *testing.T) {
 		t.Errorf("Failed to filter: %s", buf.String())
 	}
 }
+
+type logValuer struct {
+}
+
+func (x logValuer) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Any("color", "blue"),
+		slog.Any("number", "five"),
+	)
+}
+
+func TestLogValuer(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newLogger(&buf, masq.New())
+
+	var v logValuer
+	logger.Info("test", slog.Any("group", v))
+	t.Log(buf.String())
+	if !strings.Contains(buf.String(), `"color":"blue"`) {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), `"number":"five"`) {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
+}
+
+func TestArray(t *testing.T) {
+	v := struct {
+		Values [2]string
+	}{
+		Values: [2]string{"blue", "five"},
+	}
+
+	var buf bytes.Buffer
+	logger := newLogger(&buf, masq.New())
+	logger.Info("hello", slog.Any("values", v))
+
+	if !strings.Contains(buf.String(), `"blue"`) {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), `"five"`) {
+		t.Errorf("Failed to filter: %s", buf.String())
+	}
+
+}

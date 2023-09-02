@@ -138,7 +138,7 @@ func TestClone(t *testing.T) {
 			gt.V(t, copied.Name).Equal(myType("miss " + masq.DefaultRedactMessage))
 		})
 
-		t.Run("unexported field is not copied", func(t *testing.T) {
+		t.Run("unexported field should be copied", func(t *testing.T) {
 			type myStruct struct {
 				unexported string
 				Exported   string
@@ -149,7 +149,7 @@ func TestClone(t *testing.T) {
 				Exported:   "orange",
 			}
 			copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
-			gt.V(t, copied.unexported).NotEqual("red")
+			gt.V(t, copied.unexported).Equal("red")
 			gt.V(t, copied.Exported).Equal("orange")
 		})
 
