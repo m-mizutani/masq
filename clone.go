@@ -30,8 +30,7 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 	switch src.Kind() {
 	case reflect.String:
 		dst := reflect.New(src.Type())
-		filtered := x.filters.ReplaceString(src.String())
-		dst.Elem().SetString(filtered)
+		dst.Elem().SetString(src.String())
 		return dst.Elem()
 
 	case reflect.Struct:

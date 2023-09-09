@@ -2,9 +2,12 @@ package masq
 
 import (
 	"reflect"
+	"regexp"
 	"strings"
 )
 
+// Censor is a function to check if the field should be redacted. It receives field name, value, and tag of struct if the value is in struct.
+// If the field should be redacted, it returns true.
 type Censor func(fieldName string, value any, tag string) bool
 type Censors []Censor
 
@@ -15,6 +18,30 @@ func (x Censors) ShouldRedact(fieldName string, value any, tag string) bool {
 		}
 	}
 	return false
+}
+
+// string
+func newStringCensor(target string) Censor {
+	return func(fieldName string, value any, tag string) bool {
+		v := reflect.ValueOf(value)
+		if v.Kind() != reflect.String {
+			return false
+		}
+
+		return strings.Contains(v.String(), target)
+	}
+}
+
+// regex
+func newRegexCensor(target *regexp.Regexp) Censor {
+	return func(fieldName string, value any, tag string) bool {
+		v := reflect.ValueOf(value)
+		if v.Kind() != reflect.String {
+			return false
+		}
+
+		return target.FindString(v.String()) != ""
+	}
 }
 
 // type

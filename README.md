@@ -84,14 +84,12 @@ out.Flush()
 const issuedToken = "abcd1234"
 authHeader := "Authorization: Bearer " + issuedToken
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(masq.WithString("abcd1234")),
-}.NewJSONHandler(out))
+logger := newLogger(out, masq.New(masq.WithContain("abcd1234")))
 
 logger.With("auth", authHeader).Info("send header")
 out.Flush()
 // Output:
-// {"auth":"Authorization: Bearer [FILTERED]","level":"INFO","msg":"send header","time":"2022-12-25T09:00:00.123456789"}
+// {"auth":"[REDACTED]","level":"INFO","msg":"send header","time":"2022-12-25T09:00:00.123456789"}
 ```
 
 ## With regex

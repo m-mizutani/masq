@@ -13,11 +13,11 @@ func allFieldCensor(fieldName string, value interface{}, tag string) bool {
 }
 
 func TestClone(t *testing.T) {
-	c := masq.NewMasq(masq.WithString("blue"))
+	c := masq.NewMasq(masq.WithContain("blue"))
 
 	t.Run("string", func(t *testing.T) {
 		v := gt.MustCast[string](t, c.Redact("blue is blue")).NotNil()
-		gt.V(t, v).Equal(masq.DefaultRedactMessage + " is " + masq.DefaultRedactMessage)
+		gt.V(t, v).Equal(masq.DefaultRedactMessage)
 	})
 
 	t.Run("nil", func(t *testing.T) {
@@ -129,7 +129,7 @@ func TestClone(t *testing.T) {
 				Name: "miss blue",
 			}
 			copied := gt.MustCast[*myData](t, c.Redact(data)).NotNil()
-			gt.V(t, copied.Name).Equal(myType("miss " + masq.DefaultRedactMessage))
+			gt.V(t, copied.Name).Equal(myType(masq.DefaultRedactMessage))
 		})
 
 		t.Run("unexported field should be copied", func(t *testing.T) {
@@ -225,7 +225,7 @@ func TestClone(t *testing.T) {
 }
 
 func TestMapData(t *testing.T) {
-	c := masq.NewMasq(masq.WithString("blue"))
+	c := masq.NewMasq(masq.WithContain("blue"))
 
 	type testData struct {
 		ID    int
@@ -247,7 +247,7 @@ func TestMapData(t *testing.T) {
 }
 
 func TestCloneUnexportedPointer(t *testing.T) {
-	c := masq.NewMasq(masq.WithString("blue"))
+	c := masq.NewMasq(masq.WithContain("blue"))
 	type child struct {
 		Name string
 	}
@@ -264,7 +264,7 @@ func TestCloneUnexportedPointer(t *testing.T) {
 }
 
 func TestDoublePointer(t *testing.T) {
-	c := masq.NewMasq(masq.WithString("blue"))
+	c := masq.NewMasq(masq.WithContain("blue"))
 	type child struct {
 		Name string
 	}
