@@ -14,17 +14,19 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 		return reflect.New(src.Type()).Elem()
 	}
 
-	if x.censors.ShouldRedact(fieldName, src.Interface(), tag) {
-		dst := reflect.New(src.Type())
-		switch src.Kind() {
-		case reflect.String:
-			dst.Elem().SetString(x.redactMessage)
-		}
+	for _, filter := range x.filters {
+		if filter.censor(fieldName, src.Interface(), tag) {
+			dst := reflect.New(src.Type())
 
-		if !dst.CanInterface() {
-			return dst
+			if !filter.redactors.Redact(src, dst) {
+				_ = x.defaultRedactor(src, dst)
+			}
+
+			if !dst.CanInterface() {
+				return dst
+			}
+			return dst.Elem()
 		}
-		return dst.Elem()
 	}
 
 	switch src.Kind() {

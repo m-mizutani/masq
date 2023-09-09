@@ -12,9 +12,15 @@ const (
 
 type masq struct {
 	redactMessage string
-	censors       Censors
+	filters       []*Filter
 	allowedTypes  map[reflect.Type]struct{}
-	redactor      func(src reflect.Value) reflect.Value
+
+	defaultRedactor Redactor
+}
+
+type Filter struct {
+	censor    Censor
+	redactors Redactors
 }
 
 type Option func(m *masq)
@@ -24,18 +30,12 @@ func newMasq(options ...Option) *masq {
 		redactMessage: DefaultRedactMessage,
 		allowedTypes:  map[reflect.Type]struct{}{},
 	}
-
-	m.redactor = func(src reflect.Value) reflect.Value {
-		dst := reflect.New(src.Type())
+	m.defaultRedactor = func(src, dst reflect.Value) bool {
 		switch src.Kind() {
 		case reflect.String:
 			dst.Elem().SetString(m.redactMessage)
 		}
-
-		if !dst.CanInterface() {
-			return dst
-		}
-		return dst.Elem()
+		return true
 	}
 
 	for _, opt := range options {
