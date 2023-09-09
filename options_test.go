@@ -201,22 +201,20 @@ func ExampleRedactString() {
 	}
 
 	logger := newLogger(out, masq.New(
+		// custom redactor
 		masq.WithFieldName("Phone",
 			masq.RedactString(func(s string) string {
 				return "****-" + s[len(s)-4:]
 			}),
 		),
-		masq.WithFieldName("Email",
-			masq.RedactString(func(s string) string {
-				return regexp.MustCompile(`^.*@`).ReplaceAllString(s, "***@")
-			}),
-		),
+		// default redactor
+		masq.WithFieldName("Email"),
 	))
 
 	logger.With("record", record).Info("Got record")
 	out.Flush()
 	// Output:
-	// {"level":"INFO","msg":"Got record","record":{"Email":"***@hey.com","ID":"m-mizutani","Phone":"****-1234"},"time":"2022-12-25T09:00:00.123456789"}
+	// {"level":"INFO","msg":"Got record","record":{"Email":"[REDACTED]","ID":"m-mizutani","Phone":"****-1234"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
 func TestFilterWithPrefixForMap(t *testing.T) {
