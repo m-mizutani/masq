@@ -8,13 +8,7 @@ import (
 	"github.com/m-mizutani/masq"
 )
 
-type allFieldFilter struct{}
-
-func (x *allFieldFilter) ReplaceString(s string) string {
-	return s
-}
-
-func (x *allFieldFilter) ShouldRedact(fieldName string, value interface{}, tag string) bool {
+func allFieldCensor(fieldName string, value interface{}, tag string) bool {
 	return fieldName != ""
 }
 
@@ -187,7 +181,7 @@ func TestClone(t *testing.T) {
 
 	t.Run("filter various type", func(t *testing.T) {
 		mask := masq.NewMasq(
-			masq.WithFilter(&allFieldFilter{}),
+			masq.WithCensor(allFieldCensor),
 		)
 		s := "test"
 

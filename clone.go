@@ -5,19 +5,16 @@ import (
 	"unsafe"
 )
 
-func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.Value {
-	if _, ok := x.allowedTypes[value.Type()]; ok {
-		return value
+func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Value {
+	if _, ok := x.allowedTypes[src.Type()]; ok {
+		return src
 	}
 
-	src := value
-	if value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			return reflect.New(value.Type()).Elem()
-		}
+	if src.Kind() == reflect.Ptr && src.IsNil() {
+		return reflect.New(src.Type()).Elem()
 	}
 
-	if x.filters.ShouldRedact(fieldName, src.Interface(), tag) {
+	if x.censors.ShouldRedact(fieldName, src.Interface(), tag) {
 		dst := reflect.New(src.Type())
 		switch src.Kind() {
 		case reflect.String:
@@ -33,7 +30,7 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 	switch src.Kind() {
 	case reflect.String:
 		dst := reflect.New(src.Type())
-		filtered := x.filters.ReplaceString(value.String())
+		filtered := x.filters.ReplaceString(src.String())
 		dst.Elem().SetString(filtered)
 		return dst.Elem()
 

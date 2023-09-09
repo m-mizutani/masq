@@ -14,6 +14,7 @@ const (
 type masq struct {
 	redactMessage string
 	filters       Filters
+	censors       Censors
 	allowedTypes  map[reflect.Type]struct{}
 }
 
@@ -73,27 +74,33 @@ func WithRegex(target *regexp.Regexp) Option {
 	}
 }
 
+func WithCensor(censor Censor) Option {
+	return func(m *masq) {
+		m.censors = append(m.censors, censor)
+	}
+}
+
 func WithType[T any]() Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newTypeFilter[T]())
+		m.censors = append(m.censors, newTypeCensor[T]())
 	}
 }
 
 func WithTag(tag string) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newTagFilter(tag))
+		m.censors = append(m.censors, newTagCensor(tag))
 	}
 }
 
 func WithFieldName(fieldName string) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newFieldNameFilter(fieldName))
+		m.censors = append(m.censors, newFieldNameCensor(fieldName))
 	}
 }
 
 func WithFieldPrefix(fieldName string) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newFieldPrefixFilter(fieldName))
+		m.censors = append(m.censors, newFieldPrefixCensor(fieldName))
 	}
 }
 
