@@ -12,7 +12,7 @@ const (
 )
 
 type masq struct {
-	RedactMessage string
+	redactMessage string
 	filters       Filters
 	allowedTypes  map[reflect.Type]struct{}
 }
@@ -21,7 +21,7 @@ type Option func(m *masq)
 
 func newMasq(options ...Option) *masq {
 	m := &masq{
-		RedactMessage: DefaultRedactMessage,
+		redactMessage: DefaultRedactMessage,
 		allowedTypes:  map[reflect.Type]struct{}{},
 	}
 
@@ -51,7 +51,7 @@ func New(options ...Option) func(groups []string, a slog.Attr) slog.Attr {
 
 func WithRedactMessage(msg string) Option {
 	return func(m *masq) {
-		m.RedactMessage = msg
+		m.redactMessage = msg
 	}
 }
 
@@ -63,13 +63,13 @@ func WithFilter(filter Filter) Option {
 
 func WithString(target string) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newStringFilter(target, m.RedactMessage))
+		m.filters = append(m.filters, newStringFilter(target, m.redactMessage))
 	}
 }
 
 func WithRegex(target *regexp.Regexp) Option {
 	return func(m *masq) {
-		m.filters = append(m.filters, newRegexFilter(target, m.RedactMessage))
+		m.filters = append(m.filters, newRegexFilter(target, m.redactMessage))
 	}
 }
 

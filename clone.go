@@ -21,7 +21,7 @@ func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.
 		dst := reflect.New(src.Type())
 		switch src.Kind() {
 		case reflect.String:
-			dst.Elem().SetString(x.RedactMessage)
+			dst.Elem().SetString(x.redactMessage)
 		}
 
 		if !dst.CanInterface() {
