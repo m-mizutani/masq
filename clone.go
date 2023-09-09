@@ -5,36 +5,34 @@ import (
 	"unsafe"
 )
 
-func (x *masq) clone(fieldName string, value reflect.Value, tag string) reflect.Value {
-	if _, ok := x.allowedTypes[value.Type()]; ok {
-		return value
+func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Value {
+	if _, ok := x.allowedTypes[src.Type()]; ok {
+		return src
 	}
 
-	src := value
-	if value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			return reflect.New(value.Type()).Elem()
-		}
+	if src.Kind() == reflect.Ptr && src.IsNil() {
+		return reflect.New(src.Type()).Elem()
 	}
 
-	if x.filters.ShouldRedact(fieldName, src.Interface(), tag) {
-		dst := reflect.New(src.Type())
-		switch src.Kind() {
-		case reflect.String:
-			dst.Elem().SetString(x.RedactMessage)
-		}
+	for _, filter := range x.filters {
+		if filter.censor(fieldName, src.Interface(), tag) {
+			dst := reflect.New(src.Type())
 
-		if !dst.CanInterface() {
-			return dst
+			if !filter.redactors.Redact(src, dst) {
+				_ = x.defaultRedactor(src, dst)
+			}
+
+			if !dst.CanInterface() {
+				return dst
+			}
+			return dst.Elem()
 		}
-		return dst.Elem()
 	}
 
 	switch src.Kind() {
 	case reflect.String:
 		dst := reflect.New(src.Type())
-		filtered := x.filters.ReplaceString(value.String())
-		dst.Elem().SetString(filtered)
+		dst.Elem().SetString(src.String())
 		return dst.Elem()
 
 	case reflect.Struct:

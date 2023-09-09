@@ -2,7 +2,6 @@ package masq
 
 import (
 	"reflect"
-	"regexp"
 
 	"log/slog"
 )
@@ -12,17 +11,31 @@ const (
 )
 
 type masq struct {
-	RedactMessage string
-	filters       Filters
+	redactMessage string
+	filters       []*Filter
 	allowedTypes  map[reflect.Type]struct{}
+
+	defaultRedactor Redactor
+}
+
+type Filter struct {
+	censor    Censor
+	redactors Redactors
 }
 
 type Option func(m *masq)
 
 func newMasq(options ...Option) *masq {
 	m := &masq{
-		RedactMessage: DefaultRedactMessage,
+		redactMessage: DefaultRedactMessage,
 		allowedTypes:  map[reflect.Type]struct{}{},
+	}
+	m.defaultRedactor = func(src, dst reflect.Value) bool {
+		switch src.Kind() {
+		case reflect.String:
+			dst.Elem().SetString(m.redactMessage)
+		}
+		return true
 	}
 
 	for _, opt := range options {
@@ -46,61 +59,5 @@ func New(options ...Option) func(groups []string, a slog.Attr) slog.Attr {
 	return func(groups []string, attr slog.Attr) slog.Attr {
 		masked := m.redact(attr.Key, attr.Value.Any())
 		return slog.Any(attr.Key, masked)
-	}
-}
-
-func WithRedactMessage(msg string) Option {
-	return func(m *masq) {
-		m.RedactMessage = msg
-	}
-}
-
-func WithFilter(filter Filter) Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, filter)
-	}
-}
-
-func WithString(target string) Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, newStringFilter(target, m.RedactMessage))
-	}
-}
-
-func WithRegex(target *regexp.Regexp) Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, newRegexFilter(target, m.RedactMessage))
-	}
-}
-
-func WithType[T any]() Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, newTypeFilter[T]())
-	}
-}
-
-func WithTag(tag string) Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, newTagFilter(tag))
-	}
-}
-
-func WithFieldName(fieldName string) Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, newFieldNameFilter(fieldName))
-	}
-}
-
-func WithFieldPrefix(fieldName string) Option {
-	return func(m *masq) {
-		m.filters = append(m.filters, newFieldPrefixFilter(fieldName))
-	}
-}
-
-func WithAllowedType(types ...reflect.Type) Option {
-	return func(m *masq) {
-		for _, t := range types {
-			m.allowedTypes[t] = struct{}{}
-		}
 	}
 }
