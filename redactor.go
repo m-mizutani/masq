@@ -1,6 +1,7 @@
 package masq
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -31,9 +32,12 @@ func RedactString(redact func(s string) string) Redactor {
 	}
 }
 
-// MaskString is a redactor to redact string value with masked string that have the same length as the source string value. It can help the developer to know the length of the string value. The returned Redact function always returns true if the source value is string. Otherwise, it returns false.
-func MaskString(masking rune) Redactor {
+// MaskWithSymbol is a redactor to redact string value with masked string that have the same length as the source string value. It can help the developer to know the length of the string value. The returned Redact function always returns true if the source value is string. Otherwise, it returns false.
+func MaskWithSymbol(symbol rune, max int) Redactor {
 	return RedactString(func(s string) string {
-		return strings.Repeat(string(masking), len(s))
+		if len(s) > max {
+			return strings.Repeat(string(symbol), max) + fmt.Sprintf(" (remained %d chars)", len(s)-max)
+		}
+		return strings.Repeat(string(symbol), len(s))
 	})
 }
