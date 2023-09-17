@@ -289,7 +289,6 @@ func TestTime(t *testing.T) {
 	ts := time.Now()
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
-		AddSource:   true,
 		ReplaceAttr: masq.New(),
 	}))
 	logger.Info("hello")
@@ -300,4 +299,21 @@ func TestTime(t *testing.T) {
 	tv, ok := out["time"].(string)
 	gt.B(t, ok).True()
 	gt.B(t, strings.Contains(tv, ts.Format("2006-01-02"))).True()
+}
+
+type byteType [4]byte
+
+func (x byteType) LogValue() slog.Value { return slog.StringValue("stringer") }
+
+func TestDirectUUID(t *testing.T) {
+	newID := byteType{1, 2, 3, 4}
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+	logger.Info("hello",
+		slog.Any("id", newID),
+	)
+
+	gt.B(t, strings.Contains(buf.String(), "stringer")).True()
 }
