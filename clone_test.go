@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +19,7 @@ func TestClone(t *testing.T) {
 	c := masq.NewMasq(masq.WithContain("blue"))
 
 	t.Run("string", func(t *testing.T) {
-		v := gt.MustCast[string](t, c.Redact("blue is blue")).NotNil()
+		v := gt.Cast[string](t, c.Redact("blue is blue"))
 		gt.V(t, v).Equal(masq.DefaultRedactMessage)
 	})
 
@@ -41,7 +40,7 @@ func TestClone(t *testing.T) {
 				Name:  "blue",
 				Label: "five",
 			}
-			copied := gt.MustCast[*testData](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[*testData](t, c.Redact(data))
 
 			gt.V(t, copied).NotNil()
 			gt.Value(t, masq.DefaultRedactMessage).Equal(copied.Name)
@@ -56,7 +55,7 @@ func TestClone(t *testing.T) {
 				Name:  "blue",
 				Label: "five",
 			}
-			copied := gt.MustCast[testData](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[testData](t, c.Redact(data))
 			gt.V(t, copied.Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied.Label).Equal("five")
 		})
@@ -72,7 +71,7 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[*testDataParent](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[*testDataParent](t, c.Redact(data))
 			gt.V(t, copied.Child.Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied.Child.Label).Equal("five")
 		})
@@ -84,7 +83,7 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[map[string]*testData](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[map[string]*testData](t, c.Redact(data))
 
 			gt.V(t, copied["xyz"].Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied["xyz"].Label).Equal("five")
@@ -101,7 +100,7 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[[]testData](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[[]testData](t, c.Redact(data))
 			gt.V(t, copied[0].Name).Equal("orange")
 			gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied[1].Label).Equal("five")
@@ -118,7 +117,7 @@ func TestClone(t *testing.T) {
 					Label: "five",
 				},
 			}
-			copied := gt.MustCast[[]*testData](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[[]*testData](t, c.Redact(data))
 			gt.V(t, copied[0].Name).Equal("orange")
 			gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
 			gt.V(t, copied[1].Label).Equal("five")
@@ -132,7 +131,7 @@ func TestClone(t *testing.T) {
 			data := &myData{
 				Name: "miss blue",
 			}
-			copied := gt.MustCast[*myData](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[*myData](t, c.Redact(data))
 			gt.V(t, copied.Name).Equal(myType(masq.DefaultRedactMessage))
 		})
 
@@ -146,7 +145,7 @@ func TestClone(t *testing.T) {
 				unexported: "red",
 				Exported:   "orange",
 			}
-			copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[*myStruct](t, c.Redact(data))
 			gt.V(t, copied.unexported).Equal("red")
 			gt.V(t, copied.Exported).Equal("orange")
 		})
@@ -171,7 +170,7 @@ func TestClone(t *testing.T) {
 				Interface: &struct{}{},
 				Child:     nil,
 			}
-			copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+			copied := gt.Cast[*myStruct](t, c.Redact(data))
 
 			// function type is not comparable, but it's ok if not nil
 			gt.V(t, copied.Func).NotNil()
@@ -215,7 +214,7 @@ func TestClone(t *testing.T) {
 			ChildPtr:  &child{Data: "y"},
 		}
 
-		copied := gt.MustCast[*myStruct](t, mask.Redact(data)).NotNil()
+		copied := gt.Cast[*myStruct](t, mask.Redact(data))
 
 		gt.Value(t, copied.Func).Nil()
 		gt.Value(t, copied.Chan).Nil()
@@ -243,7 +242,7 @@ func TestMapData(t *testing.T) {
 			Label: "five",
 		},
 	}
-	copied := gt.MustCast[map[string]*testData](t, c.Redact(data)).NotNil()
+	copied := gt.Cast[map[string]*testData](t, c.Redact(data))
 
 	gt.V(t, copied["xyz"].Name).Equal(masq.DefaultRedactMessage)
 	gt.V(t, copied["xyz"].Label).Equal("five")
@@ -263,7 +262,7 @@ func TestCloneUnexportedPointer(t *testing.T) {
 			Name: "orange",
 		},
 	}
-	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+	copied := gt.Cast[*myStruct](t, c.Redact(data))
 	gt.V(t, copied.c.Name).Equal("orange")
 }
 
@@ -281,12 +280,12 @@ func TestDoublePointer(t *testing.T) {
 	data := &myStruct{
 		c: &childData,
 	}
-	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
+	copied := gt.Cast[*myStruct](t, c.Redact(data))
 	gt.V(t, (*copied.c).Name).Equal("orange")
 }
 
 func TestTime(t *testing.T) {
-	ts := time.Now()
+	ts := time.Now().UTC()
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
 		ReplaceAttr: masq.New(),
@@ -294,11 +293,11 @@ func TestTime(t *testing.T) {
 	logger.Info("hello")
 
 	var out map[string]any
-	gt.Error(t, json.Unmarshal(buf.Bytes(), &out)).Pass()
+	gt.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 
 	tv, ok := out["time"].(string)
 	gt.B(t, ok).True()
-	gt.B(t, strings.Contains(tv, ts.Format("2006-01-02"))).True()
+	gt.S(t, tv).Contains(ts.Format("2006-01-02"))
 }
 
 type byteType [4]byte
@@ -315,5 +314,5 @@ func TestDirectUUID(t *testing.T) {
 		slog.Any("id", newID),
 	)
 
-	gt.B(t, strings.Contains(buf.String(), "stringer")).True()
+	gt.S(t, buf.String()).Contains("stringer")
 }
