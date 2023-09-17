@@ -1,6 +1,10 @@
 package masq_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -279,4 +283,21 @@ func TestDoublePointer(t *testing.T) {
 	}
 	copied := gt.MustCast[*myStruct](t, c.Redact(data)).NotNil()
 	gt.V(t, (*copied.c).Name).Equal("orange")
+}
+
+func TestTime(t *testing.T) {
+	ts := time.Now()
+	buf := &bytes.Buffer{}
+	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
+		AddSource:   true,
+		ReplaceAttr: masq.New(),
+	}))
+	logger.Info("hello")
+
+	var out map[string]any
+	gt.Error(t, json.Unmarshal(buf.Bytes(), &out)).Pass()
+
+	tv, ok := out["time"].(string)
+	gt.B(t, ok).True()
+	gt.B(t, strings.Contains(tv, ts.Format("2006-01-02"))).True()
 }

@@ -45,12 +45,26 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 			dstValue := dst.Elem().Field(i)
 
 			if !srcValue.CanInterface() {
+				dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
+
 				if !srcValue.CanAddr() {
+					switch {
+					case srcValue.CanInt():
+						dstValue.SetInt(srcValue.Int())
+					case srcValue.CanUint():
+						dstValue.SetUint(srcValue.Uint())
+					case srcValue.CanFloat():
+						dstValue.SetFloat(srcValue.Float())
+					case srcValue.CanComplex():
+						dstValue.SetComplex(srcValue.Complex())
+					case srcValue.Kind() == reflect.Bool:
+						dstValue.SetBool(srcValue.Bool())
+					}
+
 					continue
 				}
 
 				srcValue = reflect.NewAt(srcValue.Type(), unsafe.Pointer(srcValue.UnsafeAddr())).Elem()
-				dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
 			}
 
 			tagValue := f.Tag.Get("masq")
