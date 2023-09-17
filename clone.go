@@ -94,8 +94,7 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 			return src // can not access to src.Index(0)
 		}
 
-		arrType := reflect.ArrayOf(src.Len(), src.Index(0).Type())
-		dst := reflect.New(arrType).Elem()
+		dst := reflect.New(src.Type()).Elem()
 		for i := 0; i < src.Len(); i++ {
 			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
 		}
