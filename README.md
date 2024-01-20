@@ -12,9 +12,14 @@ u := struct {
     Email: "mizutani@hey.com",
 }
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(masq.WithType[EmailAddr]()),
-}.NewJSONHandler(os.Stdout))
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithType[EmailAddr]()),
+        },
+    ),
+)
 
 logger.Info("hello", slog.Any("user", u))
 ```
@@ -38,21 +43,26 @@ Then, output is following (jq formatted).
 `masq.New()` provides a function for `ReplaceAttr` of `slog.HandlerOptions`. `masq.New` can specify one or multiple `masq.Option` to identify value and field to be concealed.
 
 ```go
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(
-        // By user defined custom type
-        masq.WithType[AccessToken](),
-
-        // By regex of phone number as e164 format
-        masq.WithRegex(regexp.MustCompile(`^\+[1-9]\d{1,14}$`)),
-
-        // By field tag such as masq:"secret"
-        masq.WithTag("secret"),
-
-        // By by field name prefix. Concealing SecureXxx field
-        masq.WithFieldPrefix("Secure"),
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+		&slog.HandlerOptions{
+            ReplaceAttr: masq.New(
+                // By user defined custom type
+                masq.WithType[AccessToken](),
+        
+                // By regex of phone number as e164 format
+                masq.WithRegex(regexp.MustCompile(`^\+[1-9]\d{1,14}$`)),
+        
+                // By field tag such as masq:"secret"
+                masq.WithTag("secret"),
+        
+                // By by field name prefix. Concealing SecureXxx field
+                masq.WithFieldPrefix("Secure"),
+            ),
+        },
     ),
-}.NewJSONHandler(out))
+)
 ```
 
 ### With custom type
@@ -68,9 +78,14 @@ record := myRecord{
     Password: "abcd1234",
 }
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(masq.WithType[password]()),
-}.NewJSONHandler(out))
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+		&slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithType[password]()),
+        },
+    ),
+)
 
 logger.With("record", record).Info("Got record")
 out.Flush()
@@ -84,7 +99,14 @@ out.Flush()
 const issuedToken = "abcd1234"
 authHeader := "Authorization: Bearer " + issuedToken
 
-logger := newLogger(out, masq.New(masq.WithContain("abcd1234")))
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithContain("abcd1234")),
+        },
+    ),
+)
 
 logger.With("auth", authHeader).Info("send header")
 out.Flush()
@@ -104,11 +126,14 @@ record := myRecord{
     Phone: "090-0000-0000",
 }
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(
-        masq.WithRegex(regexp.MustCompile(`^\d{3}-\d{4}-\d{4}$`)),
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithRegex(regexp.MustCompile(`^\d{3}-\d{4}-\d{4}$`)),
+        },
     ),
-}.NewJSONHandler(out))
+)
 
 logger.With("record", record).Info("Got record")
 out.Flush()
@@ -128,9 +153,14 @@ record := myRecord{
     EMail: "mizutani@hey.com",
 }
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(masq.WithTag("secret")),
-}.NewJSONHandler(out))
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithTag("secret")),
+        },
+    ),
+)
 
 logger.With("record", record).Info("Got record")
 out.Flush()
@@ -150,11 +180,14 @@ record := myRecord{
     Phone: "090-0000-0000",
 }
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(
-        masq.WithFieldName("Phone"),
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithFieldName("Phone")),
+        },
     ),
-}.NewJSONHandler(out))
+)
 
 logger.With("record", record).Info("Got record")
 out.Flush()
@@ -174,11 +207,14 @@ record := myRecord{
     SecurePhone: "090-0000-0000",
 }
 
-logger := slog.New(slog.HandlerOptions{
-    ReplaceAttr: masq.New(
-        masq.WithFieldPrefix("Secure"),
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(masq.WithFieldPrefix("Secure")),
+        },
     ),
-}.NewJSONHandler(out))
+)
 
 logger.With("record", record).Info("Got record")
 out.Flush()
