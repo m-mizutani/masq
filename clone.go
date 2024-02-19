@@ -106,6 +106,9 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 		dst.Elem().Set(copied)
 		return dst
 
+	case reflect.Interface:
+		return x.clone(fieldName, src.Elem(), tag)
+
 	default:
 		dst := reflect.New(src.Type())
 		dst.Elem().Set(src)
