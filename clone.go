@@ -107,6 +107,9 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 		return dst
 
 	case reflect.Interface:
+		if src.IsNil() {
+			return src
+		}
 		return x.clone(fieldName, src.Elem(), tag)
 
 	default:

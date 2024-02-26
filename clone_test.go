@@ -316,3 +316,15 @@ func TestDirectUUID(t *testing.T) {
 
 	gt.S(t, buf.String()).Contains("stringer")
 }
+
+func TestNilInterface(t *testing.T) {
+	var buf bytes.Buffer
+	type myStruct struct {
+		Data interface{}
+	}
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+	logger.Info("hello", slog.Any("test", myStruct{}))
+	gt.S(t, buf.String()).Contains("null")
+}
