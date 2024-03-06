@@ -328,3 +328,18 @@ func TestNilInterface(t *testing.T) {
 	logger.Info("hello", slog.Any("test", myStruct{}))
 	gt.S(t, buf.String()).Contains("null")
 }
+
+func TestCircularReference(t *testing.T) {
+	type myStruct struct {
+		Child *myStruct
+		Str   string
+	}
+	data := &myStruct{
+		Str: "blue",
+	}
+	data.Child = data
+
+	c := masq.NewMasq(masq.WithContain("blue"))
+	newData := c.Redact(data).(*myStruct)
+	gt.V(t, newData.Child.Child.Str).Equal("[REDACTED]")
+}
