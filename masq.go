@@ -1,6 +1,7 @@
 package masq
 
 import (
+	"context"
 	"reflect"
 
 	"log/slog"
@@ -49,7 +50,9 @@ func (x *masq) redact(k string, v any) any {
 	if v == nil {
 		return nil
 	}
-	copied := x.clone(k, reflect.ValueOf(v), "")
+
+	ctx := context.Background()
+	copied := x.clone(ctx, k, reflect.ValueOf(v), "")
 	return copied.Interface()
 }
 

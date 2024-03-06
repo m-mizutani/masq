@@ -1,11 +1,28 @@
 package masq
 
 import (
+	"context"
 	"reflect"
 	"unsafe"
 )
 
-func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Value {
+type ctxKeyDepth struct{}
+
+const (
+	maxDepth = 32
+)
+
+func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
+	if v, ok := ctx.Value(ctxKeyDepth{}).(int); !ok {
+		ctx = context.WithValue(ctx, ctxKeyDepth{}, 0)
+	} else {
+		if v >= maxDepth {
+			return src
+		}
+		ctx = context.WithValue(ctx, ctxKeyDepth{}, v+1)
+
+	}
+
 	if _, ok := x.allowedTypes[src.Type()]; ok {
 		return src
 	}
@@ -68,7 +85,7 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 			}
 
 			tagValue := f.Tag.Get("masq")
-			copied := x.clone(f.Name, srcValue, tagValue)
+			copied := x.clone(ctx, f.Name, srcValue, tagValue)
 			dstValue.Set(copied)
 		}
 		return dst.Elem()
@@ -78,14 +95,14 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 		keys := src.MapKeys()
 		for i := 0; i < src.Len(); i++ {
 			mValue := src.MapIndex(keys[i])
-			dst.SetMapIndex(keys[i], x.clone(keys[i].String(), mValue, ""))
+			dst.SetMapIndex(keys[i], x.clone(ctx, keys[i].String(), mValue, ""))
 		}
 		return dst
 
 	case reflect.Slice:
 		dst := reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
 		for i := 0; i < src.Len(); i++ {
-			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
+			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), ""))
 		}
 		return dst
 
@@ -96,13 +113,13 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 
 		dst := reflect.New(src.Type()).Elem()
 		for i := 0; i < src.Len(); i++ {
-			dst.Index(i).Set(x.clone(fieldName, src.Index(i), ""))
+			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), ""))
 		}
 		return dst
 
 	case reflect.Ptr:
 		dst := reflect.New(src.Elem().Type())
-		copied := x.clone(fieldName, src.Elem(), tag)
+		copied := x.clone(ctx, fieldName, src.Elem(), tag)
 		dst.Elem().Set(copied)
 		return dst
 
@@ -110,7 +127,7 @@ func (x *masq) clone(fieldName string, src reflect.Value, tag string) reflect.Va
 		if src.IsNil() {
 			return src
 		}
-		return x.clone(fieldName, src.Elem(), tag)
+		return x.clone(ctx, fieldName, src.Elem(), tag)
 
 	default:
 		dst := reflect.New(src.Type())
