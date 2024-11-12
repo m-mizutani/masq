@@ -8,6 +8,10 @@ import (
 )
 
 const (
+	// DefaultTagKey is a default key name of struct tag for masq. WithCustomTagKey option can change this value.
+	DefaultTagKey = "masq"
+
+	// DefaultRedactMessage is a default message to replace redacted value. WithRedactMessage option can change this value.
 	DefaultRedactMessage = "[REDACTED]"
 )
 
@@ -31,7 +35,7 @@ func newMasq(options ...Option) *masq {
 	m := &masq{
 		redactMessage: DefaultRedactMessage,
 		allowedTypes:  map[reflect.Type]struct{}{},
-		tagKey:        "masq",
+		tagKey:        DefaultTagKey,
 	}
 	m.defaultRedactor = func(src, dst reflect.Value) bool {
 		switch src.Kind() {

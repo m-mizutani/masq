@@ -149,6 +149,16 @@ func ExampleWithCustomTagKey() {
 	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
+func TestCustomTagKeyPanic(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Errorf("Failed to panic")
+		}
+	}()
+
+	masq.New(masq.WithCustomTagKey(""))
+}
+
 func ExampleWithFieldName() {
 	out := &fixedTimeWriter{}
 
