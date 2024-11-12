@@ -17,6 +17,7 @@ type masq struct {
 	allowedTypes  map[reflect.Type]struct{}
 
 	defaultRedactor Redactor
+	tagKey          string
 }
 
 type Filter struct {
@@ -30,6 +31,7 @@ func newMasq(options ...Option) *masq {
 	m := &masq{
 		redactMessage: DefaultRedactMessage,
 		allowedTypes:  map[reflect.Type]struct{}{},
+		tagKey:        "masq",
 	}
 	m.defaultRedactor = func(src, dst reflect.Value) bool {
 		switch src.Kind() {

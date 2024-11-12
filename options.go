@@ -35,6 +35,13 @@ func WithTag(tag string, redactors ...Redactor) Option {
 	return WithCensor(newTagCensor(tag), redactors...)
 }
 
+// WithCustomTagKey is an option to set the custom tag key. The default tag key is `masq`.
+func WithCustomTagKey(tagKey string) Option {
+	return func(m *masq) {
+		m.tagKey = tagKey
+	}
+}
+
 // WithFieldName is an option to check if the field name is matched with the target field name. If the field name is the target field name, the field will be redacted.
 func WithFieldName(fieldName string, redactors ...Redactor) Option {
 	return WithCensor(newFieldNameCensor(fieldName), redactors...)
