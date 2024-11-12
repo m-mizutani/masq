@@ -9,10 +9,12 @@ import (
 
 const (
 	DefaultRedactMessage = "[REDACTED]"
+	DefaultTagKey        = "masq"
 )
 
 type masq struct {
 	redactMessage string
+	tagKey        string
 	filters       []*Filter
 	allowedTypes  map[reflect.Type]struct{}
 

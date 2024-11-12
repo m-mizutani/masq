@@ -222,6 +222,36 @@ out.Flush()
 // {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","SecurePhone":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
 ```
 
+### With struct field tag (with custom tag key)
+
+```go
+type myRecord struct {
+    ID    string
+    EMail string `piifield:"secret"`
+}
+record := myRecord{
+    ID:    "m-mizutani",
+    EMail: "mizutani@hey.com",
+}
+
+logger := slog.New(
+    slog.NewJSONHandler(
+        os.Stdout,
+        &slog.HandlerOptions{
+            ReplaceAttr: masq.New(
+                masq.WithTag("secret"),
+                masq.WithTagKey("piifielld"),
+            ),
+        },
+    ),
+)
+
+logger.With("record", record).Info("Got record")
+out.Flush()
+// Output:
+// {"level":"INFO","msg":"Got record","record":{"EMail":"[FILTERED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
+```
+
 ## License
 
 Apache License v2.0

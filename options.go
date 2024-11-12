@@ -60,3 +60,14 @@ func WithRedactMessage(message string) Option {
 		m.redactMessage = message
 	}
 }
+
+// WithTagKey gives option to change the default
+// tag key to a custom tag key
+func WithTagKey(key string) Option {
+	return func(m *masq) {
+		if key == "" {
+			m.tagKey = DefaultTagKey
+		}
+		m.tagKey = key
+	}
+}

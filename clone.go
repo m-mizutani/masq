@@ -84,7 +84,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				srcValue = reflect.NewAt(srcValue.Type(), unsafe.Pointer(srcValue.UnsafeAddr())).Elem()
 			}
 
-			tagValue := f.Tag.Get("masq")
+			tagValue := f.Tag.Get(x.tagKey)
 			copied := x.clone(ctx, f.Name, srcValue, tagValue)
 			dstValue.Set(copied)
 		}
