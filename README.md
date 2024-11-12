@@ -50,13 +50,13 @@ logger := slog.New(
             ReplaceAttr: masq.New(
                 // By user defined custom type
                 masq.WithType[AccessToken](),
-        
+
                 // By regex of phone number as e164 format
                 masq.WithRegex(regexp.MustCompile(`^\+[1-9]\d{1,14}$`)),
-        
+
                 // By field tag such as masq:"secret"
                 masq.WithTag("secret"),
-        
+
                 // By by field name prefix. Concealing SecureXxx field
                 masq.WithFieldPrefix("Secure"),
             ),
@@ -166,6 +166,30 @@ logger.With("record", record).Info("Got record")
 out.Flush()
 // Output:
 // {"level":"INFO","msg":"Got record","record":{"EMail":"[FILTERED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
+```
+
+You can change the tag key by `masq.WithCustomTagKey` option.
+
+```go
+type myRecord struct {
+    ID    string
+    EMail string `custom:"secret"`
+}
+
+record := myRecord{
+    ID:    "m-mizutani",
+    EMail: "mizutani@hey.com",
+}
+
+logger := newLogger(out, masq.New(
+    masq.WithCustomTagKey("custom"),
+    masq.WithTag("secret"),
+))
+
+logger.With("record", record).Info("Got record")
+out.Flush()
+// Output:
+// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
 ```
 
 ### With struct field name

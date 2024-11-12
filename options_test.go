@@ -125,6 +125,40 @@ func ExampleWithTag() {
 	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
+func ExampleWithCustomTagKey() {
+	out := &fixedTimeWriter{}
+
+	type myRecord struct {
+		ID    string
+		EMail string `custom:"secret"`
+	}
+
+	record := myRecord{
+		ID:    "m-mizutani",
+		EMail: "mizutani@hey.com",
+	}
+
+	logger := newLogger(out, masq.New(
+		masq.WithCustomTagKey("custom"),
+		masq.WithTag("secret"),
+	))
+
+	logger.With("record", record).Info("Got record")
+	out.Flush()
+	// Output:
+	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
+}
+
+func TestCustomTagKeyPanic(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Errorf("Failed to panic")
+		}
+	}()
+
+	masq.New(masq.WithCustomTagKey(""))
+}
+
 func ExampleWithFieldName() {
 	out := &fixedTimeWriter{}
 
