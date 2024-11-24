@@ -58,6 +58,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
+			println("f.Name", f.Name)
 			srcValue := src.Field(i)
 			dstValue := dst.Elem().Field(i)
 
@@ -82,6 +83,10 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				}
 
 				srcValue = reflect.NewAt(srcValue.Type(), unsafe.Pointer(srcValue.UnsafeAddr())).Elem()
+			} else if srcValue.Kind() == reflect.Func {
+				println("func!")
+				dstValue.Set(srcValue)
+				continue
 			}
 
 			tagValue := f.Tag.Get(x.tagKey)

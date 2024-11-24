@@ -343,3 +343,17 @@ func TestCircularReference(t *testing.T) {
 	newData := c.Redact(data).(*myStruct)
 	gt.V(t, newData.Child.Child.Str).Equal("[REDACTED]")
 }
+
+func TestCloneJsonUnmarshalTypeError(t *testing.T) {
+	var s string
+	src := json.Unmarshal([]byte(`["foo"]`), &s).(*json.UnmarshalTypeError)
+	dst := masq.NewMasq().Redact(src).(*json.UnmarshalTypeError)
+	gt.Equal(t, dst, src)
+}
+
+func TestCloneFunc(t *testing.T) {
+	type myFunc func() string
+	src := myFunc(func() string { return "blue" })
+	dst := masq.NewMasq().Redact(src).(myFunc)
+	gt.Equal(t, dst(), "blue")
+}
