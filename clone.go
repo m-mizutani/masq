@@ -12,6 +12,13 @@ const (
 	maxDepth = 32
 )
 
+var (
+	// ignoreTypes is a map of types that should not be redacted. It lists types that can not be copied. For example, reflect.Type is a pointer to a struct and copying it causes panic. Especially, reflect.rtype is unexported type. Then, the ignoreTypes is list of string of type name.
+	ignoreTypes = map[string]struct{}{
+		"*reflect.rtype": {},
+	}
+)
+
 func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
 	if v, ok := ctx.Value(ctxKeyDepth{}).(int); !ok {
 		ctx = context.WithValue(ctx, ctxKeyDepth{}, 0)
@@ -24,6 +31,9 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	}
 
 	if _, ok := x.allowedTypes[src.Type()]; ok {
+		return src
+	}
+	if _, ok := ignoreTypes[src.Type().String()]; ok {
 		return src
 	}
 
@@ -58,7 +68,6 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
-			println("f.Name", f.Name)
 			srcValue := src.Field(i)
 			dstValue := dst.Elem().Field(i)
 
@@ -83,10 +92,6 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				}
 
 				srcValue = reflect.NewAt(srcValue.Type(), unsafe.Pointer(srcValue.UnsafeAddr())).Elem()
-			} else if srcValue.Kind() == reflect.Func {
-				println("func!")
-				dstValue.Set(srcValue)
-				continue
 			}
 
 			tagValue := f.Tag.Get(x.tagKey)
