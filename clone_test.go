@@ -343,3 +343,21 @@ func TestCircularReference(t *testing.T) {
 	newData := c.Redact(data).(*myStruct)
 	gt.V(t, newData.Child.Child.Str).Equal("[REDACTED]")
 }
+
+func TestCloneFunc(t *testing.T) {
+	type myFunc func() string
+	src := myFunc(func() string { return "blue" })
+	dst := masq.NewMasq().Redact(src).(myFunc)
+	gt.Equal(t, dst(), "blue")
+}
+
+func TestUnmarshalTypeError(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+	var s string
+	err := json.Unmarshal([]byte(`["foo"]`), &s)
+	logger.Info("error", slog.Any("err", err))
+	gt.S(t, buf.String()).Contains("error")
+}
