@@ -23,12 +23,21 @@ func (x Redactors) Redact(src, dst reflect.Value) bool {
 // RedactString is a redactor to redact string value. It receives a function to redact string. The function receives the string value and returns the redacted string value. The returned Redact function always returns true if the source value is string. Otherwise, it returns false.
 func RedactString(redact func(s string) string) Redactor {
 	return func(src, dst reflect.Value) bool {
-		if src.Kind() != reflect.String {
-			return false
+		if src.Kind() == reflect.String {
+			dst.Elem().SetString(redact(src.String()))
+			return true
 		}
 
-		dst.Elem().SetString(redact(src.String()))
-		return true
+		if src.Kind() == reflect.Interface && !src.IsNil() {
+			elem := src.Elem()
+			if elem.Kind() == reflect.String {
+				redacted := redact(elem.String())
+				dst.Elem().Set(reflect.ValueOf(redacted))
+				return true
+			}
+		}
+
+		return false
 	}
 }
 
