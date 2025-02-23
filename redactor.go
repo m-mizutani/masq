@@ -28,10 +28,12 @@ func RedactString(redact func(s string) string) Redactor {
 			return true
 		}
 
+		// If the source value is `any`, not nil and string, it should be redacted.
 		if src.Kind() == reflect.Interface && !src.IsNil() {
 			elem := src.Elem()
 			if elem.Kind() == reflect.String {
 				redacted := redact(elem.String())
+				// Destination value is also `any`, so it should use `Set` to set the redacted string value instead of `SetString`.
 				dst.Elem().Set(reflect.ValueOf(redacted))
 				return true
 			}
