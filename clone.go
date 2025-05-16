@@ -19,7 +19,7 @@ var (
 	}
 )
 
-func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
+func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tags map[string]Tag) reflect.Value {
 	if v, ok := ctx.Value(ctxKeyDepth{}).(int); !ok {
 		ctx = context.WithValue(ctx, ctxKeyDepth{}, 0)
 	} else {
@@ -42,7 +42,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	}
 
 	for _, filter := range x.filters {
-		if filter.censor(fieldName, src.Interface(), tag) {
+		if filter.censor(fieldName, src.Interface(), tags, x.masqTagKey) {
 			dst := reflect.New(src.Type())
 
 			if !filter.redactors.Redact(src, dst) {
@@ -94,8 +94,18 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				srcValue = reflect.NewAt(srcValue.Type(), unsafe.Pointer(srcValue.UnsafeAddr())).Elem()
 			}
 
-			tagValue := f.Tag.Get(x.tagKey)
-			copied := x.clone(ctx, f.Name, srcValue, tagValue)
+			x.tagKeys[x.masqTagKey] = struct{}{}
+			for tagKey := range x.tagKeys {
+				tagValue := f.Tag.Get(tagKey)
+				if tagValue == "" {
+					continue
+				}
+				if tags == nil {
+					tags = map[string]Tag{}
+				}
+				tags[tagKey] = Tag{Key: tagKey, Value: tagValue}
+			}
+			copied := x.clone(ctx, f.Name, srcValue, tags)
 			dstValue.Set(copied)
 		}
 		return dst.Elem()
@@ -105,14 +115,14 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		keys := src.MapKeys()
 		for i := 0; i < src.Len(); i++ {
 			mValue := src.MapIndex(keys[i])
-			dst.SetMapIndex(keys[i], x.clone(ctx, keys[i].String(), mValue, ""))
+			dst.SetMapIndex(keys[i], x.clone(ctx, keys[i].String(), mValue, nil))
 		}
 		return dst
 
 	case reflect.Slice:
 		dst := reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
 		for i := 0; i < src.Len(); i++ {
-			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), ""))
+			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), nil))
 		}
 		return dst
 
@@ -123,13 +133,13 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 		dst := reflect.New(src.Type()).Elem()
 		for i := 0; i < src.Len(); i++ {
-			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), ""))
+			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), nil))
 		}
 		return dst
 
 	case reflect.Ptr:
 		dst := reflect.New(src.Elem().Type())
-		copied := x.clone(ctx, fieldName, src.Elem(), tag)
+		copied := x.clone(ctx, fieldName, src.Elem(), tags)
 		dst.Elem().Set(copied)
 		return dst
 
@@ -137,7 +147,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		if src.IsNil() {
 			return src
 		}
-		return x.clone(ctx, fieldName, src.Elem(), tag)
+		return x.clone(ctx, fieldName, src.Elem(), tags)
 
 	default:
 		dst := reflect.New(src.Type())

@@ -21,12 +21,18 @@ type masq struct {
 	allowedTypes  map[reflect.Type]struct{}
 
 	defaultRedactor Redactor
-	tagKey          string
+	masqTagKey      string
+	tagKeys         map[string]struct{}
 }
 
 type Filter struct {
 	censor    Censor
 	redactors Redactors
+}
+
+type Tag struct {
+	Key   string
+	Value string
 }
 
 type Option func(m *masq)
@@ -35,7 +41,8 @@ func newMasq(options ...Option) *masq {
 	m := &masq{
 		redactMessage: DefaultRedactMessage,
 		allowedTypes:  map[reflect.Type]struct{}{},
-		tagKey:        DefaultTagKey,
+		masqTagKey:    DefaultTagKey,
+		tagKeys:       map[string]struct{}{},
 	}
 	m.defaultRedactor = func(src, dst reflect.Value) bool {
 		switch src.Kind() {
@@ -58,7 +65,7 @@ func (x *masq) redact(k string, v any) any {
 	}
 
 	ctx := context.Background()
-	copied := x.clone(ctx, k, reflect.ValueOf(v), "")
+	copied := x.clone(ctx, k, reflect.ValueOf(v), nil)
 	return copied.Interface()
 }
 

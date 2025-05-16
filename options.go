@@ -31,19 +31,45 @@ func WithType[T any](redactors ...Redactor) Option {
 }
 
 // WithTag is an option to check if the field is matched with the target struct tag in `masq:"xxx"`. If the field has the target tag, the field will be redacted.
-func WithTag(tag string, redactors ...Redactor) Option {
-	return WithCensor(newTagCensor(tag), redactors...)
+func WithTag(tagValue string, redactors ...Redactor) Option {
+	return WithCensor(newTagCensor(tagValue), redactors...)
 }
 
-// WithCustomTagKey is an option to set the custom tag key. The default tag key is `masq`. If the field has the target tag in the custom tag key AND the field is matched with the target tag specified by WithTag, the field will be redacted. If tagKey is empty, WithCustomTagKey panics.
-func WithCustomTagKey(tagKey string) Option {
+// WithCustomTagKey is an option to set the custom tag key. If the tag key is empty, it panics.
+func WithCustomTagKey(tagKey string, redactors ...Redactor) Option {
 	if tagKey == "" {
-		panic("masq: tag key must not be empty")
+		panic("masq:tagKey is empty")
 	}
-
 	return func(m *masq) {
-		m.tagKey = tagKey
+		m.masqTagKey = tagKey
 	}
+}
+
+func withTagKeyCensor(tagKey string, censor Censor, redactors ...Redactor) Option {
+	return func(m *masq) {
+		m.tagKeys[tagKey] = struct{}{}
+		WithCensor(censor, redactors...)(m)
+	}
+}
+
+// WithTagKeyValue is an option to check if the field is matched with the target struct tag in `tagKey:"tagValue"`. If the field has the target tag key and value, the field will be redacted.
+func WithTagKeyValue(tagKey string, tagValue string, redactors ...Redactor) Option {
+	return withTagKeyCensor(tagKey, newTagKeyValueCensor(tagKey, tagValue), redactors...)
+}
+
+// WithTagKeyValueWithRegex is an option to check if the field is match with target struct tag and its tag value is matched with the target regex. If the field has the target tag and its tag value is matched with the target regex, the field will be redacted.
+func WithTagKeyValueWithRegex(tagKey string, target *regexp.Regexp, redactors ...Redactor) Option {
+	return withTagKeyCensor(tagKey, newTagKeyValueCensorWithRegex(tagKey, target), redactors...)
+}
+
+// WithTagKeyValueContains is an option to check if the field is match with target struct tag and its tag value contains the target string. If the field has the target tag and its tag value contains the target string, the field will be redacted.
+func WithTagKeyValueContains(tagKey string, targetValue string, redactors ...Redactor) Option {
+	return withTagKeyCensor(tagKey, newTagKeyValueContainsCensor(tagKey, targetValue), redactors...)
+}
+
+// WithTagKeyValueMatch is an option to check if the field is match with target struct tag and its tag value is matched with the target function. If the field has the target tag and its tag value is matched with the target function, the field will be redacted.
+func WithTagKeyValueMatch(tagKey string, matchFn func(tagValue string) bool, redactors ...Redactor) Option {
+	return withTagKeyCensor(tagKey, newTagMatchCensor(tagKey, matchFn), redactors...)
 }
 
 // WithFieldName is an option to check if the field name is matched with the target field name. If the field name is the target field name, the field will be redacted.
