@@ -8,12 +8,12 @@ import (
 
 // Censor is a function to check if the field should be redacted. It receives field name, value, and tag of struct if the value is in struct.
 // If the field should be redacted, it returns true.
-type Censor func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool
+type Censor func(fieldName string, value any, tags map[string]Tag) bool
 type Censors []Censor
 
-func (x Censors) ShouldRedact(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+func (x Censors) ShouldRedact(fieldName string, value any, tags map[string]Tag) bool {
 	for _, censor := range x {
-		if censor(fieldName, value, tags, masqTagKey) {
+		if censor(fieldName, value, tags) {
 			return true
 		}
 	}
@@ -22,7 +22,7 @@ func (x Censors) ShouldRedact(fieldName string, value any, tags map[string]Tag, 
 
 // string
 func newStringCensor(target string) Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+	return func(fieldName string, value any, tags map[string]Tag) bool {
 		v := reflect.ValueOf(value)
 		if v.Kind() != reflect.String {
 			return false
@@ -34,7 +34,7 @@ func newStringCensor(target string) Censor {
 
 // regex
 func newRegexCensor(target *regexp.Regexp) Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+	return func(fieldName string, value any, tags map[string]Tag) bool {
 		v := reflect.ValueOf(value)
 		if v.Kind() != reflect.String {
 			return false
@@ -46,7 +46,7 @@ func newRegexCensor(target *regexp.Regexp) Censor {
 
 // type
 func newTypeCensor[T any]() Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+	return func(fieldName string, value any, tags map[string]Tag) bool {
 		var v T
 		return reflect.TypeOf(v) == reflect.TypeOf(value)
 	}
@@ -54,8 +54,8 @@ func newTypeCensor[T any]() Censor {
 
 // tag
 func newTagCensor(tagValue string) Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
-		tag, ok := tags[masqTagKey]
+	return func(fieldName string, value any, tags map[string]Tag) bool {
+		tag, ok := tags[masqTagMapKey]
 		if !ok {
 			return false
 		}
@@ -64,7 +64,7 @@ func newTagCensor(tagValue string) Censor {
 }
 
 func newTagMatchCensor(tagKey string, matchFn func(tagValue string) bool) Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+	return func(fieldName string, value any, tags map[string]Tag) bool {
 		tag, ok := tags[tagKey]
 		if !ok {
 			return false
@@ -93,14 +93,14 @@ func newTagKeyValueContainsCensor(tagKey string, targetValue string) Censor {
 
 // field name
 func newFieldNameCensor(name string) Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+	return func(fieldName string, value any, tags map[string]Tag) bool {
 		return name == fieldName
 	}
 }
 
 // field name prefix
 func newFieldPrefixCensor(prefix string) Censor {
-	return func(fieldName string, value any, tags map[string]Tag, masqTagKey string) bool {
+	return func(fieldName string, value any, tags map[string]Tag) bool {
 		return strings.HasPrefix(fieldName, prefix)
 	}
 }

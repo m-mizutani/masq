@@ -11,7 +11,7 @@ import (
 	"github.com/m-mizutani/masq"
 )
 
-func allFieldCensor(fieldName string, value interface{}, tags map[string]masq.Tag, masqTagKey string) bool {
+func allFieldCensor(fieldName string, value interface{}, tags map[string]masq.Tag) bool {
 	return fieldName != ""
 }
 

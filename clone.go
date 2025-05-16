@@ -10,6 +10,9 @@ type ctxKeyDepth struct{}
 
 const (
 	maxDepth = 32
+	// Use empty string to indicate the package-level tag in the tag map since empty string is not a valid tag key
+	// and therefore there's no risk of collisions
+	masqTagMapKey = ""
 )
 
 var (
@@ -42,7 +45,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	}
 
 	for _, filter := range x.filters {
-		if filter.censor(fieldName, src.Interface(), tags, x.masqTagKey) {
+		if filter.censor(fieldName, src.Interface(), tags) {
 			dst := reflect.New(src.Type())
 
 			if !filter.redactors.Redact(src, dst) {
@@ -104,6 +107,9 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 					tags = map[string]Tag{}
 				}
 				tags[tagKey] = Tag{Key: tagKey, Value: tagValue}
+			}
+			if _, ok := tags[x.masqTagKey]; ok {
+				tags[masqTagMapKey] = tags[x.masqTagKey]
 			}
 			copied := x.clone(ctx, f.Name, srcValue, tags)
 			dstValue.Set(copied)
