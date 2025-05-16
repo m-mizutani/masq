@@ -193,6 +193,52 @@ func ExampleWithTagKeyValueWithRegex() {
 	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
 }
 
+func ExampleWithTagKeyValueContains() {
+	out := &fixedTimeWriter{}
+
+	type myRecord struct {
+		ID    string
+		EMail string `foo:"bar,baz"`
+	}
+	record := myRecord{
+		ID:    "m-mizutani",
+		EMail: "mizutani@hey.com",
+	}
+
+	logger := newLogger(out, masq.New(
+		masq.WithTagKeyValueContains("foo", "bar"),
+	))
+
+	logger.With("record", record).Info("Got record")
+	out.Flush()
+	// Output:
+	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
+}
+
+func ExampleWithTagKeyValueMatch() {
+	out := &fixedTimeWriter{}
+
+	type myRecord struct {
+		ID    string
+		EMail string `foo:"bar,baz"`
+	}
+	record := myRecord{
+		ID:    "m-mizutani",
+		EMail: "mizutani@hey.com",
+	}
+
+	logger := newLogger(out, masq.New(
+		masq.WithTagKeyValueMatch("foo", func (tagValue string) bool {
+			return tagValue == "bar,baz"
+		}),
+	))
+
+	logger.With("record", record).Info("Got record")
+	out.Flush()
+	// Output:
+	// {"level":"INFO","msg":"Got record","record":{"EMail":"[REDACTED]","ID":"m-mizutani"},"time":"2022-12-25T09:00:00.123456789"}
+}
+
 func TestCustomTagKeyPanic(t *testing.T) {
 	defer func() {
 		if recover() == nil {
