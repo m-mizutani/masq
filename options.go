@@ -35,10 +35,11 @@ func WithTag(tagValue string, redactors ...Redactor) Option {
 	return WithCensor(newTagCensor(tagValue), redactors...)
 }
 
-// WithCustomTagKey is an option to set the custom tag key. If the tag key is empty, it panics.
-func WithCustomTagKey(tagKey string, redactors ...Redactor) Option {
+
+// WithCustomTagKey is an option to set the custom tag key. The default tag key is `masq`. If the field has the target tag in the custom tag key AND the field is matched with the target tag specified by WithTag, the field will be redacted. If tagKey is empty, WithCustomTagKey panics.
+func WithCustomTagKey(tagKey string) Option {
 	if tagKey == "" {
-		panic("masq:tagKey is empty")
+		panic("masq:tagKey must not be empty")
 	}
 	return func(m *masq) {
 		m.masqTagKey = tagKey
