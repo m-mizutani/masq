@@ -915,9 +915,7 @@ func TestUnexportedFieldsEdgeCases(t *testing.T) {
 	})
 
 	t.Run("Deeply nested unexported structs with empty values", func(t *testing.T) {
-		type level3 struct {
-			value string
-		}
+		type level3 struct{}
 		type level2 struct {
 			inner *level3
 			slice []level3
