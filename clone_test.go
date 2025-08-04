@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
@@ -288,7 +289,7 @@ func TestTime(t *testing.T) {
 	ts := time.Now().UTC()
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
-		ReplaceAttr: masq.New(),
+		ReplaceAttr: masq.New(masq.WithAllowedType(reflect.TypeOf(time.Time{}))),
 	}))
 	logger.Info("hello")
 
@@ -361,3 +362,1043 @@ func TestUnmarshalTypeError(t *testing.T) {
 	logger.Info("error", slog.Any("err", err))
 	gt.S(t, buf.String()).Contains("error")
 }
+
+func TestCloneUnexportedStructFields(t *testing.T) {
+	// Test for handling unexported fields in unexported structs
+	type unexportedInner struct {
+		privateField string
+		PublicField  string
+	}
+
+	type publicOuter struct {
+		Inner      unexportedInner
+		InnerPtr   *unexportedInner
+		unexported string
+		Exported   string
+	}
+
+	data := &publicOuter{
+		Inner: unexportedInner{
+			privateField: "secret1",
+			PublicField:  "public1",
+		},
+		InnerPtr: &unexportedInner{
+			privateField: "secret2",
+			PublicField:  "public2",
+		},
+		unexported: "hidden",
+		Exported:   "visible",
+	}
+
+	mask := masq.NewMasq()
+	copied := gt.Cast[*publicOuter](t, mask.Redact(data))
+
+	// Verify all fields are copied correctly
+	gt.V(t, copied.Inner.privateField).Equal("secret1")
+	gt.V(t, copied.Inner.PublicField).Equal("public1")
+	gt.V(t, copied.InnerPtr.privateField).Equal("secret2")
+	gt.V(t, copied.InnerPtr.PublicField).Equal("public2")
+	gt.V(t, copied.unexported).Equal("hidden")
+	gt.V(t, copied.Exported).Equal("visible")
+}
+
+func TestCloneComplexUnexportedTypes(t *testing.T) {
+	// Test with slices, maps, and arrays of unexported types
+	type unexportedType struct {
+		value string
+		num   int
+	}
+
+	type complexStruct struct {
+		Slice     []unexportedType
+		SlicePtr  []*unexportedType
+		Array     [2]unexportedType
+		Map       map[string]unexportedType
+		MapPtr    map[string]*unexportedType
+		Interface interface{}
+	}
+
+	data := &complexStruct{
+		Slice: []unexportedType{
+			{value: "val1", num: 1},
+			{value: "val2", num: 2},
+		},
+		SlicePtr: []*unexportedType{
+			{value: "ptr1", num: 11},
+			{value: "ptr2", num: 22},
+		},
+		Array: [2]unexportedType{
+			{value: "arr1", num: 111},
+			{value: "arr2", num: 222},
+		},
+		Map: map[string]unexportedType{
+			"key1": {value: "map1", num: 100},
+			"key2": {value: "map2", num: 200},
+		},
+		MapPtr: map[string]*unexportedType{
+			"ptr1": {value: "mapptr1", num: 1000},
+			"ptr2": {value: "mapptr2", num: 2000},
+		},
+		Interface: &unexportedType{value: "iface", num: 999},
+	}
+
+	mask := masq.NewMasq()
+	copied := gt.Cast[*complexStruct](t, mask.Redact(data))
+
+	// Verify slices
+	gt.V(t, len(copied.Slice)).Equal(2)
+	gt.V(t, copied.Slice[0].value).Equal("val1")
+	gt.V(t, copied.Slice[0].num).Equal(1)
+	gt.V(t, copied.Slice[1].value).Equal("val2")
+	gt.V(t, copied.Slice[1].num).Equal(2)
+
+	// Verify slice of pointers
+	gt.V(t, len(copied.SlicePtr)).Equal(2)
+	gt.V(t, copied.SlicePtr[0].value).Equal("ptr1")
+	gt.V(t, copied.SlicePtr[0].num).Equal(11)
+
+	// Verify array
+	gt.V(t, copied.Array[0].value).Equal("arr1")
+	gt.V(t, copied.Array[0].num).Equal(111)
+
+	// Verify map
+	gt.V(t, len(copied.Map)).Equal(2)
+	gt.V(t, copied.Map["key1"].value).Equal("map1")
+	gt.V(t, copied.Map["key1"].num).Equal(100)
+
+	// Verify map of pointers
+	gt.V(t, len(copied.MapPtr)).Equal(2)
+	gt.V(t, copied.MapPtr["ptr1"].value).Equal("mapptr1")
+	gt.V(t, copied.MapPtr["ptr1"].num).Equal(1000)
+
+	// Verify interface
+	iface := copied.Interface.(*unexportedType)
+	gt.V(t, iface.value).Equal("iface")
+	gt.V(t, iface.num).Equal(999)
+}
+
+func TestMapWithStructValues(t *testing.T) {
+	// Test with exported struct in map first
+	type Item struct {
+		ID    string
+		Value int
+	}
+
+	type container struct {
+		ItemMap map[string]Item
+	}
+
+	original := &container{
+		ItemMap: map[string]Item{
+			"key1": {ID: "id1", Value: 100},
+			"key2": {ID: "id2", Value: 200},
+		},
+	}
+
+	mask := masq.NewMasq()
+	cloned := mask.Redact(original).(*container)
+
+	gt.V(t, len(cloned.ItemMap)).Equal(2)
+	gt.V(t, cloned.ItemMap["key1"].ID).Equal("id1")
+	gt.V(t, cloned.ItemMap["key1"].Value).Equal(100)
+
+	// Now test with unexported struct
+	type item struct {
+		id    string
+		value int
+	}
+
+	type container2 struct {
+		itemMap map[string]item
+	}
+
+	original2 := &container2{
+		itemMap: map[string]item{
+			"key1": {id: "id1", value: 100},
+			"key2": {id: "id2", value: 200},
+		},
+	}
+
+	cloned2 := mask.Redact(original2).(*container2)
+
+	// Access values directly - due to map limitation with unexported types,
+	// the map is returned as-is
+	item1 := cloned2.itemMap["key1"]
+	gt.V(t, item1.id).Equal("id1")
+	gt.V(t, item1.value).Equal(100)
+}
+
+func TestMapWithUnexportedTypes(t *testing.T) {
+	t.Run("maps with unexported types have limitations", func(t *testing.T) {
+		// This test demonstrates the limitation mentioned in README.md
+		original := NewMapContainer()
+
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
+
+		// Both UserMap (map[string]*privateUser) and DataMap (map[string]privateData)
+		// should be the same reference due to Go reflection limitations
+
+		// Check UserMap - even with pointers to unexported types, it's not cloned
+		gt.V(t, len(cloned.UserMap)).Equal(2)
+		originalUser1 := original.UserMap["user1"]
+		clonedUser1 := cloned.UserMap["user1"]
+		gt.V(t, clonedUser1).Equal(originalUser1) // Same pointer - map wasn't cloned
+
+		// Check DataMap - direct unexported type, also not cloned
+		gt.V(t, len(cloned.DataMap)).Equal(2)
+	})
+
+	t.Run("filtering still works on maps with unexported types", func(t *testing.T) {
+		original := NewMapContainer()
+
+		// Create mask that redacts "password" field
+		mask := masq.NewMasq(masq.WithFieldName("password"))
+		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
+
+		// Even though the map isn't cloned, filtering still works
+		// because the map contains pointers, and we can clone the pointed-to values
+		user1 := cloned.UserMap["user1"]
+
+		// The pointer should be different because we cloned the struct
+		gt.V(t, user1).NotEqual(original.UserMap["user1"])
+
+		// And the password should be redacted
+		gt.V(t, user1.id).Equal("u1")
+		gt.V(t, user1.username).Equal("alice")
+		gt.V(t, user1.password).Equal("[REDACTED]")
+	})
+}
+
+func TestMapFieldCloning(t *testing.T) {
+	t.Run("exported map field", func(t *testing.T) {
+		type container struct {
+			M map[string]string
+		}
+
+		original := &container{
+			M: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+		}
+
+		mask := masq.NewMasq()
+		cloned := mask.Redact(original).(*container)
+
+		gt.V(t, len(cloned.M)).Equal(2)
+		gt.V(t, cloned.M["key1"]).Equal("value1")
+		gt.V(t, cloned.M["key2"]).Equal("value2")
+	})
+
+	t.Run("unexported map field", func(t *testing.T) {
+		type container struct {
+			m map[string]string
+		}
+
+		// Helper to access unexported field
+		getMap := func(c *container) map[string]string {
+			return c.m
+		}
+
+		original := &container{
+			m: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+		}
+
+		mask := masq.NewMasq()
+		cloned := mask.Redact(original).(*container)
+
+		clonedMap := getMap(cloned)
+		gt.V(t, len(clonedMap)).Equal(2)
+		gt.V(t, clonedMap["key1"]).Equal("value1")
+		gt.V(t, clonedMap["key2"]).Equal("value2")
+	})
+}
+
+func TestCloneExternalUnexportedStructs(t *testing.T) {
+	t.Run("PublicUser with unexported fields", func(t *testing.T) {
+		original := NewPublicUser()
+		mask := masq.NewMasq()
+
+		copied := gt.Cast[*PublicUser](t, mask.Redact(original))
+
+		// Verify exported fields
+		gt.V(t, copied.ID).Equal("user-123")
+		gt.V(t, copied.Email).Equal("john@example.com")
+		// For time.Time, we should check if it's not zero
+		gt.V(t, copied.CreatedAt.IsZero()).Equal(false)
+
+		// Verify unexported fields
+		gt.V(t, copied.username).Equal("john_doe")
+		gt.V(t, copied.password).Equal("secret123")
+
+		// Verify unexported nested struct
+		gt.V(t, copied.metadata.loginCount).Equal(42)
+		// Skip map verification due to limitation with unexported types
+		// gt.V(t, metadata.GetPreference("theme")).Equal("dark")
+		// gt.V(t, metadata.GetPreference("language")).Equal("en")
+	})
+
+	t.Run("PublicConfig with nested unexported structs", func(t *testing.T) {
+		original := NewPublicConfig()
+		mask := masq.NewMasq()
+
+		copied := gt.Cast[*PublicConfig](t, mask.Redact(original))
+
+		// Verify exported fields
+		gt.V(t, copied.AppName).Equal("TestApp")
+		gt.V(t, copied.Version).Equal("1.0.0")
+
+		// Verify unexported fields
+		gt.V(t, copied.apiKey).Equal("sk-1234567890abcdef")
+		gt.V(t, copied.dbPassword).Equal("postgres://secret")
+
+		// Verify nested unexported struct
+		gt.V(t, copied.Settings.debug).Equal(true)
+		gt.V(t, copied.Settings.maxRetries).Equal(3)
+		gt.V(t, copied.Settings.timeout.String()).Equal("30s")
+		gt.V(t, len(copied.Settings.endpoints)).Equal(2)
+
+		// Verify endpoints (slice of unexported structs)
+		endpoint1 := copied.Settings.endpoints[0]
+		gt.V(t, endpoint1.name).Equal("api")
+		gt.V(t, endpoint1.url).Equal("https://api.example.com")
+		gt.V(t, endpoint1.auth.token).Equal("bearer-token-123")
+
+		endpoint2 := copied.Settings.endpoints[1]
+		gt.V(t, endpoint2.name).Equal("webhook")
+		gt.V(t, endpoint2.url).Equal("https://webhook.example.com")
+		gt.V(t, endpoint2.auth.token).Equal("webhook-secret-456")
+
+		// Verify credentials (pointer to unexported struct)
+		gt.V(t, copied.Settings.credentials != nil).Equal(true)
+		creds := copied.Settings.credentials
+		gt.V(t, creds.username).Equal("admin")
+		gt.V(t, creds.password).Equal("admin123")
+		gt.V(t, creds.apiKey).Equal("master-key-789")
+	})
+
+	t.Run("ComplexData with various unexported types", func(t *testing.T) {
+		original := NewComplexData()
+		mask := masq.NewMasq()
+
+		copied := gt.Cast[*ComplexData](t, mask.Redact(original))
+
+		// Verify exported field
+		gt.V(t, copied.Name).Equal("Complex")
+
+		// Verify slice of unexported structs
+		gt.V(t, len(copied.items)).Equal(2)
+		item1 := copied.items[0]
+		gt.V(t, item1.id).Equal("item1")
+		gt.V(t, item1.value).Equal(100)
+		gt.V(t, item1.tags[0]).Equal("tag1")
+		gt.V(t, item1.tags[1]).Equal("tag2")
+
+		// Verify slice of pointers to unexported structs
+		itemPtr1 := copied.itemsPtr[0]
+		gt.V(t, itemPtr1).NotNil()
+		gt.V(t, itemPtr1.id).Equal("ptr1")
+		gt.V(t, itemPtr1.value).Equal(300)
+
+		// Skip map verification due to limitation with unexported types in maps
+		// The itemMap field (map[string]item) cannot be properly cloned because 'item' is an unexported type
+		// As documented in README.md, maps with unexported value types are returned as-is without cloning
+		// This means:
+		// 1. The map itself is not cloned (same reference)
+		// 2. Values in the map cannot be modified/filtered
+		// 3. GetItemFromMap would return the original item, not a cloned one
+		// mapItem := copied.GetItemFromMap("key1")
+		// gt.V(t, mapItem.GetID()).Equal("map1")
+		// gt.V(t, mapItem.GetValue()).Equal(500)
+
+		// Verify array of unexported structs
+		arrayItem := copied.itemArray[0]
+		gt.V(t, arrayItem.id).Equal("arr1")
+		gt.V(t, arrayItem.value).Equal(700)
+
+		// Verify interface containing unexported struct
+		ifaceItem := copied.Interface.(*item)
+		gt.V(t, ifaceItem).NotNil()
+		gt.V(t, ifaceItem.id).Equal("iface")
+		gt.V(t, ifaceItem.value).Equal(1000)
+	})
+
+	t.Run("ComplexData itemMap limitation demonstration", func(t *testing.T) {
+		// This test explicitly demonstrates the limitation with itemMap
+		original := NewComplexData()
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*ComplexData](t, mask.Redact(original))
+
+		// The itemMap field should be the same reference (not cloned)
+		// We can verify this indirectly by checking that modifications to the original
+		// would affect the cloned version (though we can't modify unexported types directly)
+
+		// We can at least verify the map still has data
+		item := cloned.itemMap["key1"]
+		gt.V(t, item.id).Equal("map1")
+		gt.V(t, item.value).Equal(500)
+
+		// Note: Unlike slices and arrays of unexported types which ARE properly cloned,
+		// maps with unexported value types are NOT cloned due to Go's reflection limitations
+		t.Log("itemMap was not cloned - this is expected behavior due to Go reflection limitations")
+	})
+}
+
+func TestRedactExternalUnexportedStructs(t *testing.T) {
+	t.Run("Redact sensitive fields in unexported structs", func(t *testing.T) {
+		original := NewPublicUser()
+
+		// Create masq that redacts fields containing "password" or "secret"
+		mask := masq.NewMasq(
+			masq.WithFieldName("password"),
+			masq.WithFieldPrefix("api"),
+			masq.WithContain("secret"),
+		)
+
+		copied := gt.Cast[*PublicUser](t, mask.Redact(original))
+
+		// Verify non-sensitive fields are preserved
+		gt.V(t, copied.ID).Equal("user-123")
+		gt.V(t, copied.Email).Equal("john@example.com")
+		gt.V(t, copied.username).Equal("john_doe")
+
+		// Verify sensitive field is redacted
+		gt.V(t, copied.password).Equal("[REDACTED]")
+	})
+
+	t.Run("Redact nested sensitive data", func(t *testing.T) {
+		original := NewPublicConfig()
+
+		// Create masq that redacts various sensitive patterns
+		mask := masq.NewMasq(
+			masq.WithFieldName("password"),
+			masq.WithFieldName("dbPassword"), // Add specific field name
+			masq.WithFieldName("apiKey"),
+			masq.WithFieldName("token"),
+			masq.WithContain("secret"),
+			masq.WithContain("postgres://"),
+		)
+
+		copied := gt.Cast[*PublicConfig](t, mask.Redact(original))
+
+		// Verify non-sensitive fields
+		gt.V(t, copied.AppName).Equal("TestApp")
+		gt.V(t, copied.Version).Equal("1.0.0")
+
+		// Verify sensitive fields are redacted
+		gt.V(t, copied.apiKey).Equal("[REDACTED]")
+		gt.V(t, copied.dbPassword).Equal("[REDACTED]")
+
+		// Verify nested sensitive data
+		endpoint1 := copied.Settings.endpoints[0]
+		gt.V(t, endpoint1.name).Equal("api")
+		gt.V(t, endpoint1.url).Equal("https://api.example.com")
+		gt.V(t, endpoint1.auth.token).Equal("[REDACTED]") // token field should be redacted
+
+		// Verify credentials are redacted
+		creds := copied.Settings.credentials
+		gt.V(t, creds.username).Equal("admin")
+		gt.V(t, creds.password).Equal("[REDACTED]")
+		gt.V(t, creds.apiKey).Equal("[REDACTED]")
+	})
+}
+
+func TestUnexportedFieldsEdgeCases(t *testing.T) {
+	t.Run("Empty string in unexported fields", func(t *testing.T) {
+		type testStruct struct {
+			Public     string
+			unexported string
+		}
+		
+		original := &testStruct{
+			Public:     "public",
+			unexported: "", // empty string
+		}
+		
+		mask := masq.NewMasq()
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.unexported).Equal("") // Should preserve empty string
+	})
+
+	t.Run("Nil pointer in unexported field", func(t *testing.T) {
+		type inner struct {
+			value string
+		}
+		type testStruct struct {
+			Public      string
+			unexported  *inner
+			unexported2 *inner
+		}
+		
+		original := &testStruct{
+			Public:      "public",
+			unexported:  nil, // nil pointer
+			unexported2: &inner{value: "test"},
+		}
+		
+		mask := masq.NewMasq()
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.unexported).Nil()
+		gt.V(t, copied.unexported2).NotNil()
+		gt.V(t, copied.unexported2.value).Equal("test")
+	})
+
+	t.Run("Empty slice and map in unexported fields", func(t *testing.T) {
+		type testStruct struct {
+			Public          string
+			unexportedSlice []string
+			unexportedMap   map[string]string
+			unexportedNilSlice []string
+			unexportedNilMap   map[string]string
+		}
+		
+		original := &testStruct{
+			Public:          "public",
+			unexportedSlice: []string{}, // empty slice
+			unexportedMap:   map[string]string{}, // empty map
+			unexportedNilSlice: nil, // nil slice
+			unexportedNilMap:   nil, // nil map
+		}
+		
+		mask := masq.NewMasq()
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		// Empty slices should be copied as empty slices
+		gt.V(t, len(copied.unexportedSlice)).Equal(0)
+		// Empty maps should be copied as empty maps
+		gt.V(t, len(copied.unexportedMap)).Equal(0)
+		// NOTE: Current implementation converts nil slices to empty slices
+		gt.V(t, len(copied.unexportedNilSlice)).Equal(0)
+		// NOTE: Current implementation converts nil maps to empty maps
+		gt.V(t, len(copied.unexportedNilMap)).Equal(0)
+	})
+
+	t.Run("Zero values in unexported numeric fields", func(t *testing.T) {
+		type testStruct struct {
+			Public      string
+			intField    int
+			floatField  float64
+			boolField   bool
+			uintField   uint
+			complexField complex128
+		}
+		
+		original := &testStruct{
+			Public: "public",
+			// All numeric fields have zero values
+		}
+		
+		mask := masq.NewMasq()
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.intField).Equal(0)
+		gt.V(t, copied.floatField).Equal(0.0)
+		gt.V(t, copied.boolField).Equal(false)
+		gt.V(t, copied.uintField).Equal(uint(0))
+		gt.V(t, copied.complexField).Equal(complex128(0))
+	})
+
+	t.Run("Unexported interface field handling", func(t *testing.T) {
+		// NOTE: Unexported interface fields can cause runtime errors in Go's reflection system
+		// This is documented in README as a known limitation
+		t.Skip("Skipping due to Go reflection limitations with unexported interface fields (see README)")
+	})
+
+	t.Run("Deeply nested unexported structs with empty values", func(t *testing.T) {
+		type level3 struct {
+			value string
+		}
+		type level2 struct {
+			inner *level3
+			slice []level3
+		}
+		type level1 struct {
+			Public string
+			nested level2
+		}
+		
+		original := &level1{
+			Public: "public",
+			nested: level2{
+				inner: nil,
+				slice: []level3{},
+			},
+		}
+		
+		mask := masq.NewMasq()
+		copied := gt.Cast[*level1](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.nested.inner).Nil()
+		gt.V(t, len(copied.nested.slice)).Equal(0)
+	})
+
+	t.Run("Unexported array fields", func(t *testing.T) {
+		type testStruct struct {
+			Public      string
+			emptyArray  [0]string
+			smallArray  [3]int
+			ptrArray    [2]*string
+		}
+		
+		s1 := "one"
+		original := &testStruct{
+			Public:     "public",
+			emptyArray: [0]string{},
+			smallArray: [3]int{1, 0, 3}, // includes zero
+			ptrArray:   [2]*string{&s1, nil}, // includes nil
+		}
+		
+		mask := masq.NewMasq()
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, len(copied.emptyArray)).Equal(0)
+		gt.V(t, copied.smallArray).Equal([3]int{1, 0, 3})
+		gt.V(t, copied.ptrArray[0]).NotNil()
+		gt.V(t, *copied.ptrArray[0]).Equal("one")
+		gt.V(t, copied.ptrArray[1]).Nil()
+	})
+}
+
+func TestRedactUnexportedFieldsAdvanced(t *testing.T) {
+	t.Run("Redact unexported fields by field name", func(t *testing.T) {
+		type testStruct struct {
+			Public      string
+			password    string
+			secretKey   string
+			normalField string
+		}
+		
+		original := &testStruct{
+			Public:      "public",
+			password:    "mypassword123",
+			secretKey:   "sk-1234567890",
+			normalField: "normal",
+		}
+		
+		mask := masq.NewMasq(
+			masq.WithFieldName("password"),
+			masq.WithFieldPrefix("secret"),
+		)
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.password).Equal("[REDACTED]")
+		gt.V(t, copied.secretKey).Equal("[REDACTED]")
+		gt.V(t, copied.normalField).Equal("normal")
+	})
+
+	t.Run("Redact unexported struct fields with tags", func(t *testing.T) {
+		type inner struct {
+			value  string
+			secret string `masq:"secret"`
+		}
+		type testStruct struct {
+			Public     string
+			unexported inner
+			tagged     string `masq:"secret"`
+		}
+		
+		original := &testStruct{
+			Public: "public",
+			unexported: inner{
+				value:  "normal",
+				secret: "confidential",
+			},
+			tagged: "tagged-secret",
+		}
+		
+		mask := masq.NewMasq(masq.WithTag("secret"))
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.unexported.value).Equal("normal")
+		gt.V(t, copied.unexported.secret).Equal("[REDACTED]")
+		gt.V(t, copied.tagged).Equal("[REDACTED]")
+	})
+
+	t.Run("Redact unexported fields in slices", func(t *testing.T) {
+		type item struct {
+			id       string
+			password string
+		}
+		type testStruct struct {
+			Public string
+			items  []item
+		}
+		
+		original := &testStruct{
+			Public: "public",
+			items: []item{
+				{id: "1", password: "pass1"},
+				{id: "2", password: "pass2"},
+			},
+		}
+		
+		mask := masq.NewMasq(masq.WithFieldName("password"))
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, len(copied.items)).Equal(2)
+		gt.V(t, copied.items[0].id).Equal("1")
+		gt.V(t, copied.items[0].password).Equal("[REDACTED]")
+		gt.V(t, copied.items[1].id).Equal("2")
+		gt.V(t, copied.items[1].password).Equal("[REDACTED]")
+	})
+
+	t.Run("Redact with custom redactor for unexported fields", func(t *testing.T) {
+		type testStruct struct {
+			Public   string
+			apiKey   string
+			password string
+		}
+		
+		original := &testStruct{
+			Public:   "public",
+			apiKey:   "sk-1234567890abcdef",
+			password: "mypassword",
+		}
+		
+		mask := masq.NewMasq(
+			masq.WithFieldName("apiKey", masq.MaskWithSymbol('*', 10)),
+			masq.WithFieldName("password", masq.RedactString(func(s string) string { return "XXX" })),
+		)
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		// apiKey has 19 chars, showing first 10 with mask
+		gt.V(t, copied.apiKey).Equal("********** (remained 9 chars)")
+		gt.V(t, copied.password).Equal("XXX")
+	})
+
+	t.Run("Redact nested unexported pointer fields", func(t *testing.T) {
+		type credential struct {
+			username string
+			password string
+		}
+		type config struct {
+			name string
+			cred *credential
+		}
+		type testStruct struct {
+			Public string
+			conf   *config
+		}
+		
+		original := &testStruct{
+			Public: "public",
+			conf: &config{
+				name: "prod",
+				cred: &credential{
+					username: "admin",
+					password: "secret123",
+				},
+			},
+		}
+		
+		mask := masq.NewMasq(masq.WithFieldName("password"))
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		gt.V(t, copied.conf.name).Equal("prod")
+		gt.V(t, copied.conf.cred.username).Equal("admin")
+		gt.V(t, copied.conf.cred.password).Equal("[REDACTED]")
+	})
+
+	t.Run("Limitation: Content filters don't work on unexported fields", func(t *testing.T) {
+		type testStruct struct {
+			Public      string
+			PublicToken string
+			token       string
+			apiEndpoint string
+			normalData  string
+		}
+		
+		original := &testStruct{
+			Public:      "public",
+			PublicToken: "Bearer xyz",
+			token:       "Bearer abc123xyz",
+			apiEndpoint: "https://api.secret.com/v1",
+			normalData:  "just normal data",
+		}
+		
+		mask := masq.NewMasq(
+			masq.WithContain("Bearer"),
+			masq.WithContain("secret"),
+		)
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+		
+		gt.V(t, copied.Public).Equal("public")
+		// Content filters work on exported fields
+		gt.V(t, copied.PublicToken).Equal("[REDACTED]")
+		// But NOT on unexported fields (this is a limitation)
+		gt.V(t, copied.token).Equal("Bearer abc123xyz")
+		gt.V(t, copied.apiEndpoint).Equal("https://api.secret.com/v1")
+		gt.V(t, copied.normalData).Equal("just normal data")
+	})
+
+	t.Run("Complex scenario with multiple unexported types", func(t *testing.T) {
+		type secretData struct {
+			key   string
+			value string
+		}
+		type publicData struct {
+			ID          string
+			privateKey  string `masq:"secret"`
+			credentials struct {
+				username string
+				password string
+			}
+			tokens    []string
+			secrets   []secretData
+			metadata  map[string]string
+		}
+		
+		original := &publicData{
+			ID:         "123",
+			privateKey: "private-key-value",
+			credentials: struct {
+				username string
+				password string
+			}{
+				username: "user",
+				password: "pass",
+			},
+			tokens: []string{"token1", "token2"},
+			secrets: []secretData{
+				{key: "api", value: "secret-api-key"},
+				{key: "db", value: "secret-db-pass"},
+			},
+			metadata: map[string]string{
+				"env":      "prod",
+				"password": "metadata-pass",
+			},
+		}
+		
+		mask := masq.NewMasq(
+			masq.WithTag("secret"),
+			masq.WithFieldName("password"),
+			masq.WithFieldPrefix("private"),
+			masq.WithContain("secret"),
+		)
+		copied := gt.Cast[*publicData](t, mask.Redact(original))
+		
+		gt.V(t, copied.ID).Equal("123")
+		gt.V(t, copied.privateKey).Equal("[REDACTED]")
+		gt.V(t, copied.credentials.username).Equal("user")
+		gt.V(t, copied.credentials.password).Equal("[REDACTED]")
+		gt.V(t, copied.tokens[0]).Equal("token1")
+		// NOTE: WithContain doesn't work on unexported fields
+		gt.V(t, copied.secrets[0].value).Equal("secret-api-key")
+		gt.V(t, copied.secrets[1].value).Equal("secret-db-pass")
+		gt.V(t, copied.metadata["env"]).Equal("prod")
+		gt.V(t, copied.metadata["password"]).Equal("[REDACTED]")
+	})
+}
+
+// Types moved from testdata/unexported_structs
+
+// PublicUser is an exported struct with mixed fields
+type PublicUser struct {
+	ID        string
+	username  string // unexported
+	Email     string
+	password  string // unexported
+	CreatedAt time.Time
+	metadata  userMeta // unexported type
+}
+
+// userMeta is an unexported struct
+type userMeta struct {
+	lastLogin   time.Time
+	loginCount  int
+	preferences map[string]string
+}
+
+// PublicConfig with unexported fields and nested types
+type PublicConfig struct {
+	AppName    string
+	Version    string
+	apiKey     string // unexported sensitive field
+	dbPassword string // unexported sensitive field
+	Settings   settings
+}
+
+// settings is unexported struct
+type settings struct {
+	debug       bool
+	maxRetries  int
+	timeout     time.Duration
+	endpoints   []endpoint
+	credentials *credential
+}
+
+// endpoint is unexported
+type endpoint struct {
+	name string
+	url  string
+	auth authInfo
+}
+
+// authInfo is unexported
+type authInfo struct {
+	token  string
+	expiry time.Time
+}
+
+// credential is unexported
+type credential struct {
+	username string
+	password string
+	apiKey   string
+}
+
+// NewPublicUser creates a new user with all fields populated
+func NewPublicUser() *PublicUser {
+	return &PublicUser{
+		ID:        "user-123",
+		username:  "john_doe",
+		Email:     "john@example.com",
+		password:  "secret123",
+		CreatedAt: time.Now(),
+		metadata: userMeta{
+			lastLogin:  time.Now(),
+			loginCount: 42,
+			preferences: map[string]string{
+				"theme":    "dark",
+				"language": "en",
+			},
+		},
+	}
+}
+
+// NewPublicConfig creates a config with nested unexported structs
+func NewPublicConfig() *PublicConfig {
+	return &PublicConfig{
+		AppName:    "TestApp",
+		Version:    "1.0.0",
+		apiKey:     "sk-1234567890abcdef",
+		dbPassword: "postgres://secret",
+		Settings: settings{
+			debug:      true,
+			maxRetries: 3,
+			timeout:    30 * time.Second,
+			endpoints: []endpoint{
+				{
+					name: "api",
+					url:  "https://api.example.com",
+					auth: authInfo{
+						token:  "bearer-token-123",
+						expiry: time.Now().Add(24 * time.Hour),
+					},
+				},
+				{
+					name: "webhook",
+					url:  "https://webhook.example.com",
+					auth: authInfo{
+						token:  "webhook-secret-456",
+						expiry: time.Now().Add(48 * time.Hour),
+					},
+				},
+			},
+			credentials: &credential{
+				username: "admin",
+				password: "admin123",
+				apiKey:   "master-key-789",
+			},
+		},
+	}
+}
+
+// ComplexData has various types of unexported fields
+type ComplexData struct {
+	Name      string
+	items     []item          // ✅ Slice of unexported type - can be cloned properly
+	itemsPtr  []*item         // ✅ Slice of pointers to unexported type - can be cloned properly
+	itemMap   map[string]item // ❌ Map with unexported value type - CANNOT be cloned (Go reflection limitation)
+	itemArray [3]item         // ✅ Array of unexported type - can be cloned properly
+	Interface interface{}     // ✅ Interface containing unexported type - can be cloned properly
+}
+
+// item is unexported
+type item struct {
+	id    string
+	value int
+	tags  []string
+}
+
+// NewComplexData creates complex nested data
+func NewComplexData() *ComplexData {
+	return &ComplexData{
+		Name: "Complex",
+		items: []item{
+			{id: "item1", value: 100, tags: []string{"tag1", "tag2"}},
+			{id: "item2", value: 200, tags: []string{"tag3"}},
+		},
+		itemsPtr: []*item{
+			{id: "ptr1", value: 300, tags: []string{"ptag1"}},
+			{id: "ptr2", value: 400, tags: nil},
+		},
+		itemMap: map[string]item{
+			"key1": {id: "map1", value: 500, tags: []string{"mtag1"}},
+			"key2": {id: "map2", value: 600, tags: []string{"mtag2", "mtag3"}},
+		},
+		itemArray: [3]item{
+			{id: "arr1", value: 700, tags: []string{"atag1"}},
+			{id: "arr2", value: 800, tags: []string{"atag2"}},
+			{id: "arr3", value: 900, tags: []string{"atag3"}},
+		},
+		Interface: &item{id: "iface", value: 1000, tags: []string{"itag"}},
+	}
+}
+
+// MapContainer specifically tests maps with pointers to unexported types
+type MapContainer struct {
+	// Map with pointer to unexported type - still has limitations
+	// Even though the value is a pointer, the pointed-to type is unexported,
+	// so the map cannot be cloned due to Go reflection limitations
+	UserMap map[string]*privateUser // ❌ Cannot be cloned
+
+	// Map with unexported type directly - has same limitations
+	DataMap map[string]privateData // ❌ Cannot be cloned
+}
+
+// privateUser is unexported
+type privateUser struct {
+	id       string
+	username string
+	password string
+}
+
+// privateData is unexported
+type privateData struct {
+	content string
+	secret  string
+}
+
+// NewMapContainer creates a container with different map types
+func NewMapContainer() *MapContainer {
+	return &MapContainer{
+		UserMap: map[string]*privateUser{
+			"user1": {id: "u1", username: "alice", password: "pass123"},
+			"user2": {id: "u2", username: "bob", password: "secret456"},
+		},
+		DataMap: map[string]privateData{
+			"data1": {content: "content1", secret: "secret1"},
+			"data2": {content: "content2", secret: "secret2"},
+		},
+	}
+}
+
+

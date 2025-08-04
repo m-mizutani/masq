@@ -23,6 +23,9 @@ func (x Censors) ShouldRedact(fieldName string, value any, tag string) bool {
 // string
 func newStringCensor(target string) Censor {
 	return func(fieldName string, value any, tag string) bool {
+		if value == nil {
+			return false
+		}
 		v := reflect.ValueOf(value)
 		if v.Kind() != reflect.String {
 			return false
@@ -35,6 +38,9 @@ func newStringCensor(target string) Censor {
 // regex
 func newRegexCensor(target *regexp.Regexp) Censor {
 	return func(fieldName string, value any, tag string) bool {
+		if value == nil {
+			return false
+		}
 		v := reflect.ValueOf(value)
 		if v.Kind() != reflect.String {
 			return false
