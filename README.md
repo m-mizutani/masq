@@ -246,6 +246,70 @@ out.Flush()
 // {"level":"INFO","msg":"Got record","record":{"ID":"m-mizutani","SecurePhone":"[FILTERED]"},"time":"2022-12-25T09:00:00.123456789"}
 ```
 
+## Limitations
+
+Due to Go's reflection constraints, certain types cannot be properly handled by `masq`. These types will not appear in log outputs.
+
+### ❌ Maps with unexported or un-interfaceable types
+
+Due to Go's reflection API limitations, `masq` cannot properly clone maps in the following cases:
+
+1. **Maps with unexported key or value types**: When the map's key or value type is defined in another package and not exported.
+2. **Maps containing un-interfaceable keys or values**: Even with exported types, some values may not be accessible via `CanInterface()` due to how they were created or their context.
+
+For example:
+
+```go
+type privateData struct {
+    id string
+}
+
+type Container struct {
+    // Cannot be cloned due to unexported types
+    dataMap    map[string]privateData  // Unexported value type
+    pointerMap map[string]*privateData // Pointer to unexported type
+    privateKey map[privateData]string  // Unexported key type
+    
+    // May not be cloneable if keys/values are un-interfaceable
+    complexMap map[interface{}]interface{}
+}
+```
+
+In such cases, the original map is returned as-is without cloning. This prevents data loss or corruption that would occur from attempting to handle un-interfaceable keys or values.
+
+**Note**: This limitation also applies to maps that are fields within unexported struct fields. When a map is contained in an unexported field, it cannot be cloned and filtering will not be applied to its values.
+
+### ❌ Unexported interface fields
+
+Unexported fields with interface{} type can cause runtime errors when accessed through reflection. This is a fundamental limitation of Go's type system and reflection API. For example:
+
+```go
+type MyStruct struct {
+    data interface{} // unexported interface field - may cause runtime errors
+}
+```
+
+**Workaround:** Use exported interface fields or concrete types instead of unexported interface fields.
+
+### ❌ Content-based filters on unexported fields
+
+Content-based filters like `WithContain()` and `WithRegex()` do not work on unexported fields because the field values cannot be accessed through reflection. These filters only work on exported fields.
+
+**Note:** Field name and tag-based filters (`WithFieldName()`, `WithFieldPrefix()`, `WithTag()`) work correctly on unexported fields.
+
+### Working collection types
+
+The following collection types work correctly with unexported types:
+- Slices of unexported types (e.g., `[]privateData`) - ✅ Properly cloned
+- Arrays of unexported types (e.g., `[3]privateData`) - ✅ Properly cloned (including redaction)
+- Slices of pointers to unexported types (e.g., `[]*privateData`) - ✅ Properly cloned
+- Maps with unexported types (e.g., `map[string]privateData`) - ❌ Not cloned (limitation)
+
+**Workarounds:**
+- Use exported types for map values
+- Keep sensitive data in regular struct fields or slices (not in maps) where masq can properly handle unexported types
+- Use wrapper types that are exported
+
 ## License
 
 Apache License v2.0
