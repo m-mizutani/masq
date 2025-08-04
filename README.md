@@ -248,9 +248,16 @@ out.Flush()
 
 ## Limitations
 
-### ❌ Maps with unexported value types
+Due to Go's reflection constraints, certain types cannot be properly handled by `masq`. These types will not appear in log outputs.
 
-Due to Go's reflection API limitations, `masq` cannot properly clone maps that have unexported types as values. This includes both direct unexported types and pointers to unexported types. For example:
+### ❌ Maps with unexported or un-interfaceable types
+
+Due to Go's reflection API limitations, `masq` cannot properly clone maps in the following cases:
+
+1. **Maps with unexported key or value types**: When the map's key or value type is defined in another package and not exported.
+2. **Maps containing un-interfaceable keys or values**: Even with exported types, some values may not be accessible via `CanInterface()` due to how they were created or their context.
+
+For example:
 
 ```go
 type privateData struct {
@@ -258,13 +265,19 @@ type privateData struct {
 }
 
 type Container struct {
-    // Neither of these maps can be fully cloned due to unexported types
-    dataMap    map[string]privateData  // Direct unexported type
+    // Cannot be cloned due to unexported types
+    dataMap    map[string]privateData  // Unexported value type
     pointerMap map[string]*privateData // Pointer to unexported type
+    privateKey map[privateData]string  // Unexported key type
+    
+    // May not be cloneable if keys/values are un-interfaceable
+    complexMap map[interface{}]interface{}
 }
 ```
 
-In such cases, the original map is returned as-is without cloning. This is a fundamental limitation of Go's reflection system, where `reflect.Value.SetMapIndex` cannot be used with values obtained from unexported types.
+In such cases, the original map is returned as-is without cloning. This prevents data loss or corruption that would occur from attempting to handle un-interfaceable keys or values.
+
+**Note**: This limitation also applies to maps that are fields within unexported struct fields. When a map is contained in an unexported field, it cannot be cloned and filtering will not be applied to its values.
 
 ### ❌ Unexported interface fields
 

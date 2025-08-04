@@ -254,17 +254,23 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		// Create a completely new map
 		mapType := src.Type()
 
+		// Check if the map key type is unexported
+		keyType := mapType.Key()
+		isUnexportedKeyType := keyType.PkgPath() != ""
+
 		// Check if the map value type is unexported
 		valueType := mapType.Elem()
 		isUnexportedValueType := valueType.PkgPath() != ""
 
-		// If map has unexported value type, return the original map
+		// If map has unexported key or value type, return the original map
 		// This is a limitation due to Go's reflection API
-		// Note: This applies to both direct unexported types (map[K]unexportedType)
-		// and pointers to unexported types (map[K]*unexportedType)
-		// The limitation is due to reflect.Value.SetMapIndex not working with
-		// values obtained from unexported types
-		if isUnexportedValueType {
+		if isUnexportedKeyType || isUnexportedValueType {
+			return src
+		}
+
+		// Check if we're in an unexported context by checking if we can create values
+		// This happens when the map is inside an unexported struct field
+		if !src.CanInterface() {
 			return src
 		}
 
@@ -279,45 +285,8 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			// Clone the value
 			clonedValue := x.clone(ctx, key.String(), value, "")
 
-			// Ensure key is exportable
-			exportableKey := key
-			if !key.CanInterface() {
-				// Create a new key value
-				newKey := reflect.New(mapType.Key()).Elem()
-				switch key.Kind() {
-				case reflect.String:
-					newKey.SetString(key.String())
-				default:
-					if key.CanInterface() {
-						newKey.Set(key)
-					}
-				}
-				exportableKey = newKey
-			}
-
-			// Ensure value is exportable
-			exportableValue := clonedValue
-			if !clonedValue.CanInterface() {
-				// Create a new value
-				newValue := reflect.New(valueType).Elem()
-				switch clonedValue.Kind() {
-				case reflect.String:
-					newValue.SetString(clonedValue.String())
-				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-					if clonedValue.CanInt() {
-						newValue.SetInt(clonedValue.Int())
-					}
-				case reflect.Bool:
-					newValue.SetBool(clonedValue.Bool())
-				default:
-					// For complex types, we can't handle them properly
-					// Just use zero value
-				}
-				exportableValue = newValue
-			}
-
 			// Set in the destination map
-			dst.SetMapIndex(exportableKey, exportableValue)
+			dst.SetMapIndex(key, clonedValue)
 		}
 		return dst
 
@@ -335,7 +304,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 		// For arrays, we need to create an addressable copy to work with
 		dst := reflect.New(src.Type()).Elem()
-		
+
 		// If the source can be set directly, use normal approach
 		if dst.CanSet() && src.CanInterface() {
 			for i := 0; i < src.Len(); i++ {
@@ -344,14 +313,14 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			}
 			return dst
 		}
-		
+
 		// For unexported arrays, we need to copy the entire array at once
 		if src.CanAddr() && dst.CanAddr() {
 			srcPtr := unsafe.Pointer(src.UnsafeAddr())
 			dstPtr := unsafe.Pointer(dst.UnsafeAddr())
 			size := src.Type().Size()
 			copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
-			
+
 			// Now process each element for potential redaction
 			for i := 0; i < src.Len(); i++ {
 				elemValue := dst.Index(i)
@@ -372,7 +341,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				}
 			}
 		}
-		
+
 		return dst
 
 	case reflect.Ptr:
