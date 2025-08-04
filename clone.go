@@ -322,22 +322,26 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
 
 			// Now process each element for potential redaction
-			for i := 0; i < src.Len(); i++ {
+			for i := 0; i < dst.Len(); i++ {
 				elemValue := dst.Index(i)
-				if elemValue.Kind() == reflect.String && elemValue.CanInterface() {
-					// Apply filters to the element
-					for _, filter := range x.filters {
-						if filter.censor(fieldName, elemValue.Interface(), "") {
-							redacted := reflect.New(elemValue.Type())
-							if !filter.redactors.Redact(elemValue, redacted) {
-								_ = x.defaultRedactor(elemValue, redacted)
-							}
-							if redacted.Elem().CanInterface() {
-								elemValue.Set(redacted.Elem())
-							}
-							break
-						}
+				clonedElem := x.clone(ctx, fieldName, elemValue, "")
+
+				// The element in the array is not settable, so we must use unsafe to copy the cloned value back.
+				if elemValue.CanAddr() {
+					var addrCopied reflect.Value
+					if clonedElem.CanAddr() {
+						addrCopied = clonedElem
+					} else {
+						// If the cloned value is not addressable, create a new addressable value and copy into it.
+						newVal := reflect.New(clonedElem.Type())
+						newVal.Elem().Set(clonedElem)
+						addrCopied = newVal.Elem()
 					}
+
+					dstPtr := unsafe.Pointer(elemValue.UnsafeAddr())
+					srcPtr := unsafe.Pointer(addrCopied.UnsafeAddr())
+					size := clonedElem.Type().Size()
+					copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
 				}
 			}
 		}

@@ -1162,6 +1162,72 @@ func TestUnexportedFieldsEdgeCases(t *testing.T) {
 		gt.V(t, *copied.ptrArray[0]).Equal("one")
 		gt.V(t, copied.ptrArray[1]).Nil()
 	})
+
+	t.Run("Unexported array with struct elements can be redacted", func(t *testing.T) {
+		type user struct {
+			name     string
+			password string
+		}
+		type testStruct struct {
+			Public string
+			users  [3]user
+		}
+
+		original := &testStruct{
+			Public: "public",
+			users: [3]user{
+				{name: "alice", password: "secret1"},
+				{name: "bob", password: "secret2"},
+				{name: "charlie", password: "secret3"},
+			},
+		}
+
+		mask := masq.NewMasq(masq.WithFieldName("password"))
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+
+		gt.V(t, copied.Public).Equal("public")
+		// All passwords should be redacted
+		gt.V(t, copied.users[0].name).Equal("alice")
+		gt.V(t, copied.users[0].password).Equal("[REDACTED]")
+		gt.V(t, copied.users[1].name).Equal("bob")
+		gt.V(t, copied.users[1].password).Equal("[REDACTED]")
+		gt.V(t, copied.users[2].name).Equal("charlie")
+		gt.V(t, copied.users[2].password).Equal("[REDACTED]")
+	})
+
+	t.Run("Unexported array with mixed types", func(t *testing.T) {
+		type sensitive struct {
+			apiKey string
+		}
+		type testStruct struct {
+			Public      string
+			stringArray [2]string
+			structArray [2]sensitive
+		}
+
+		original := &testStruct{
+			Public:      "public",
+			stringArray: [2]string{"normal", "Bearer token123"},
+			structArray: [2]sensitive{
+				{apiKey: "sk-12345"},
+				{apiKey: "sk-67890"},
+			},
+		}
+
+		mask := masq.NewMasq(
+			masq.WithContain("Bearer"),
+			masq.WithFieldName("apiKey"),
+		)
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+
+		gt.V(t, copied.Public).Equal("public")
+		// String array element with "Bearer" should be redacted
+		gt.V(t, copied.stringArray[0]).Equal("normal")
+		gt.V(t, copied.stringArray[1]).Equal("[REDACTED]")
+		// Struct array elements with apiKey field should be redacted
+		gt.V(t, copied.structArray[0].apiKey).Equal("[REDACTED]")
+		gt.V(t, copied.structArray[1].apiKey).Equal("[REDACTED]")
+	})
 }
 
 func TestRedactUnexportedFieldsAdvanced(t *testing.T) {
