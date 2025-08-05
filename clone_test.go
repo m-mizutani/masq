@@ -634,7 +634,7 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		}
 
 		mask := masq.NewMasq()
-		
+
 		// Should not panic
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
@@ -731,13 +731,13 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 	t.Run("prevent data loss from un-interfaceable keys", func(t *testing.T) {
 		// This test verifies that we don't lose data by mapping multiple
 		// un-interfaceable keys to the same zero value
-		
+
 		// Create a struct with unexported fields to use as map keys
 		type complexKey struct {
 			id   int
 			name string
 		}
-		
+
 		type container struct {
 			// Map with struct keys containing unexported fields
 			Data map[complexKey]string
