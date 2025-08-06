@@ -287,19 +287,30 @@ func TestDoublePointer(t *testing.T) {
 }
 
 func TestTime(t *testing.T) {
-	ts := time.Now().UTC()
 	buf := &bytes.Buffer{}
 	logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
 		ReplaceAttr: masq.New(masq.WithAllowedType(reflect.TypeOf(time.Time{}))),
 	}))
+
+	// Get timestamp just before logging to minimize time difference
+	beforeLog := time.Now()
 	logger.Info("hello")
+	afterLog := time.Now()
 
 	var out map[string]any
 	gt.NoError(t, json.Unmarshal(buf.Bytes(), &out))
 
 	tv, ok := out["time"].(string)
 	gt.B(t, ok).True()
-	gt.S(t, tv).Contains(ts.Format("2006-01-02"))
+
+	// Parse the logged time
+	loggedTime, err := time.Parse(time.RFC3339Nano, tv)
+	gt.NoError(t, err)
+
+	// Verify the logged time is within the expected range
+	if loggedTime.Before(beforeLog) || loggedTime.After(afterLog) {
+		t.Errorf("Logged time %v is not within expected range [%v, %v]", loggedTime, beforeLog, afterLog)
+	}
 }
 
 type byteType [4]byte
@@ -634,7 +645,7 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		}
 
 		mask := masq.NewMasq()
-		
+
 		// Should not panic
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
@@ -731,13 +742,13 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 	t.Run("prevent data loss from un-interfaceable keys", func(t *testing.T) {
 		// This test verifies that we don't lose data by mapping multiple
 		// un-interfaceable keys to the same zero value
-		
+
 		// Create a struct with unexported fields to use as map keys
 		type complexKey struct {
 			id   int
 			name string
 		}
-		
+
 		type container struct {
 			// Map with struct keys containing unexported fields
 			Data map[complexKey]string
