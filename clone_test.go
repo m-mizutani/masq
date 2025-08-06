@@ -308,8 +308,8 @@ func TestTime(t *testing.T) {
 	gt.NoError(t, err)
 
 	// Verify the logged time is within the expected range
-	if loggedTime.Before(beforeLog) || loggedTime.After(afterLog.Add(time.Second)) {
-		t.Errorf("Logged time %v is not within expected range [%v, %v]", loggedTime, beforeLog, afterLog.Add(time.Second))
+	if loggedTime.Before(beforeLog) || loggedTime.After(afterLog) {
+		t.Errorf("Logged time %v is not within expected range [%v, %v]", loggedTime, beforeLog, afterLog)
 	}
 }
 
