@@ -6,12 +6,14 @@ toolchain go1.24.3
 
 require (
 	github.com/aws/jsii-runtime-go v1.113.0
+	github.com/m-mizutani/gt v0.0.7
 	github.com/m-mizutani/masq v0.0.0
 )
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/yuin/goldmark v1.4.13 // indirect
