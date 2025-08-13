@@ -20,6 +20,14 @@ var (
 )
 
 func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
+	// Make the value addressable if it's not already
+	// This is crucial for properly handling embedded unexported structs
+	if !src.CanAddr() && src.IsValid() && src.CanInterface() {
+		addressableValue := reflect.New(src.Type()).Elem()
+		addressableValue.Set(src)
+		src = addressableValue
+	}
+
 	if v, ok := ctx.Value(ctxKeyDepth{}).(int); !ok {
 		ctx = context.WithValue(ctx, ctxKeyDepth{}, 0)
 	} else {
