@@ -1477,6 +1477,90 @@ func TestRedactUnexportedFieldsAdvanced(t *testing.T) {
 		// So filtering does not work on map values when the map itself is unexported
 		gt.V(t, copied.metadata["password"]).Equal("metadata-pass")
 	})
+
+	t.Run("pointer to struct with unexported fields", func(t *testing.T) {
+		// This test specifically verifies the fix for the panic that occurred in clone.go:362
+		// when handling pointers to structs with unexported fields
+
+		type unexportedStruct struct {
+			secret   string // unexported field
+			number   int    // unexported field
+			exported string // exported field
+		}
+
+		type container struct {
+			Name string
+			Data *unexportedStruct // pointer to struct with unexported fields
+		}
+
+		// Create test data that would trigger the original panic
+		original := &container{
+			Name: "test container",
+			Data: &unexportedStruct{
+				secret:   "sensitive data",
+				number:   123,
+				exported: "public data",
+			},
+		}
+
+		// This should not panic (it did before the fix)
+		mask := masq.NewMasq()
+
+		// The clone operation should complete without panic
+		copied := gt.Cast[*container](t, mask.Redact(original))
+
+		// Verify the data was copied correctly
+		gt.V(t, copied.Name).Equal("test container")
+		gt.V(t, copied.Data).NotNil()
+		gt.V(t, copied.Data.secret).Equal("sensitive data")
+		gt.V(t, copied.Data.number).Equal(123)
+		gt.V(t, copied.Data.exported).Equal("public data")
+
+		// Verify it's a deep copy (modifying original shouldn't affect copy)
+		original.Data.secret = "modified"
+		gt.V(t, copied.Data.secret).Equal("sensitive data") // Should remain unchanged
+
+		// Verify different memory addresses
+		gt.V(t, copied.Data == original.Data).Equal(false)
+	})
+
+	t.Run("Panic fix: nested pointers with unexported fields", func(t *testing.T) {
+		// Test more complex nesting scenarios
+
+		type deepStruct struct {
+			hidden string // unexported
+		}
+
+		type middleStruct struct {
+			deep *deepStruct // pointer to struct with unexported fields
+		}
+
+		type topStruct struct {
+			middle *middleStruct // nested pointer
+		}
+
+		original := &topStruct{
+			middle: &middleStruct{
+				deep: &deepStruct{
+					hidden: "deeply hidden",
+				},
+			},
+		}
+
+		// This should not panic
+		mask := masq.NewMasq()
+		copied := gt.Cast[*topStruct](t, mask.Redact(original))
+
+		// Verify the nested structure was copied correctly
+		gt.V(t, copied.middle).NotNil()
+		gt.V(t, copied.middle.deep).NotNil()
+		gt.V(t, copied.middle.deep.hidden).Equal("deeply hidden")
+
+		// Verify deep copy (all levels should be separate)
+		original.middle.deep.hidden = "modified"
+		gt.V(t, copied.middle.deep.hidden).Equal("deeply hidden")
+		gt.V(t, copied.middle.deep == original.middle.deep).Equal(false)
+	})
 }
 
 // Types moved from testdata/unexported_structs

@@ -359,7 +359,17 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	case reflect.Ptr:
 		dst := reflect.New(src.Elem().Type())
 		copied := x.clone(ctx, fieldName, src.Elem(), tag)
-		dst.Elem().Set(copied)
+
+		// Try to set directly first
+		if dst.Elem().CanSet() {
+			dst.Elem().Set(copied)
+		} else if dst.Elem().CanAddr() && copied.CanAddr() {
+			// For unexported types, use unsafe operations
+			dstPtr := unsafe.Pointer(dst.Elem().UnsafeAddr())
+			srcPtr := unsafe.Pointer(copied.UnsafeAddr())
+			size := copied.Type().Size()
+			copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+		}
 		return dst
 
 	case reflect.Interface:
