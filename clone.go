@@ -19,6 +19,18 @@ var (
 	}
 )
 
+// unsafeCopyValue performs unsafe memory copying between two reflect.Values
+// This is used when normal reflection methods cannot be used due to unexported fields
+func unsafeCopyValue(dst, src reflect.Value) {
+	if !dst.CanAddr() || !src.CanAddr() {
+		return
+	}
+	dstPtr := unsafe.Pointer(dst.UnsafeAddr())
+	srcPtr := unsafe.Pointer(src.UnsafeAddr())
+	size := src.Type().Size()
+	copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+}
+
 func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
 	// Make the value addressable if it's not already
 	// This is crucial for properly handling embedded unexported structs
@@ -46,7 +58,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	}
 
 	if src.Kind() == reflect.Ptr && src.IsNil() {
-		return reflect.New(src.Type()).Elem()
+		return reflect.Zero(src.Type())
 	}
 
 	for _, filter := range x.filters {
@@ -104,10 +116,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 								_ = x.defaultRedactor(srcValue, dst)
 							}
 							// Copy the redacted value using unsafe
-							srcPtr := unsafe.Pointer(dst.Elem().UnsafeAddr())
-							dstPtr := unsafe.Pointer(dstValue.UnsafeAddr())
-							size := dst.Elem().Type().Size()
-							copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+							unsafeCopyValue(dstValue, dst.Elem())
 							break
 						}
 					}
@@ -183,7 +192,13 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						copied := x.clone(ctx, f.Name, srcValue, tagValue)
 						// Set the cloned value to the destination field
 						dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
-						dstValue.Set(copied)
+						// Check if the copied value is valid and can be set
+						if dstValue.CanSet() && copied.IsValid() {
+							dstValue.Set(copied)
+						} else if copied.IsValid() && copied.CanAddr() && dstValue.CanAddr() {
+							// Use unsafe operations for unexported fields or non-settable values
+							unsafeCopyValue(dstValue, copied)
+						}
 						continue
 					case reflect.Struct:
 						// For struct types, recursively clone to apply filters
@@ -191,10 +206,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						copied := x.clone(ctx, f.Name, srcValue, tagValue)
 						// We need to use unsafe operations to set the value
 						if copied.CanAddr() && dstValue.CanAddr() {
-							dstPtr := unsafe.Pointer(dstValue.UnsafeAddr())
-							srcPtr := unsafe.Pointer(copied.UnsafeAddr())
-							size := copied.Type().Size()
-							copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+							unsafeCopyValue(dstValue, copied)
 						}
 						continue
 					case reflect.Array, reflect.Interface:
@@ -203,10 +215,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						copied := x.clone(ctx, f.Name, srcValue, tagValue)
 						// We need to use unsafe operations to set the value
 						if copied.CanAddr() && dstValue.CanAddr() {
-							dstPtr := unsafe.Pointer(dstValue.UnsafeAddr())
-							srcPtr := unsafe.Pointer(copied.UnsafeAddr())
-							size := copied.Type().Size()
-							copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+							unsafeCopyValue(dstValue, copied)
 						}
 						continue
 					default:
@@ -249,10 +258,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 					addrCopied = newVal.Elem()
 				}
 
-				dstPtr := unsafe.Pointer(dstValue.UnsafeAddr())
-				srcPtr := unsafe.Pointer(addrCopied.UnsafeAddr())
-				size := copied.Type().Size()
-				copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+				unsafeCopyValue(dstValue, addrCopied)
 			}
 		}
 
@@ -301,7 +307,14 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	case reflect.Slice:
 		dst := reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
 		for i := 0; i < src.Len(); i++ {
-			dst.Index(i).Set(x.clone(ctx, fieldName, src.Index(i), ""))
+			cloned := x.clone(ctx, fieldName, src.Index(i), "")
+			dstElem := dst.Index(i)
+			if dstElem.CanSet() && cloned.IsValid() {
+				dstElem.Set(cloned)
+			} else if cloned.IsValid() && dstElem.CanAddr() && cloned.CanAddr() {
+				// Use unsafe operations for unexported elements or non-settable values
+				unsafeCopyValue(dstElem, cloned)
+			}
 		}
 		return dst
 
@@ -317,17 +330,20 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		if dst.CanSet() && src.CanInterface() {
 			for i := 0; i < src.Len(); i++ {
 				cloned := x.clone(ctx, fieldName, src.Index(i), "")
-				dst.Index(i).Set(cloned)
+				dstElem := dst.Index(i)
+				if dstElem.CanSet() && cloned.IsValid() {
+					dstElem.Set(cloned)
+				} else if cloned.IsValid() && dstElem.CanAddr() && cloned.CanAddr() {
+					// Use unsafe operations for unexported elements or non-settable values
+					unsafeCopyValue(dstElem, cloned)
+				}
 			}
 			return dst
 		}
 
 		// For unexported arrays, we need to copy the entire array at once
 		if src.CanAddr() && dst.CanAddr() {
-			srcPtr := unsafe.Pointer(src.UnsafeAddr())
-			dstPtr := unsafe.Pointer(dst.UnsafeAddr())
-			size := src.Type().Size()
-			copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+			unsafeCopyValue(dst, src)
 
 			// Now process each element for potential redaction
 			for i := 0; i < dst.Len(); i++ {
@@ -346,10 +362,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						addrCopied = newVal.Elem()
 					}
 
-					dstPtr := unsafe.Pointer(elemValue.UnsafeAddr())
-					srcPtr := unsafe.Pointer(addrCopied.UnsafeAddr())
-					size := clonedElem.Type().Size()
-					copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+					unsafeCopyValue(elemValue, addrCopied)
 				}
 			}
 		}
@@ -360,15 +373,12 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		dst := reflect.New(src.Elem().Type())
 		copied := x.clone(ctx, fieldName, src.Elem(), tag)
 
-		// Try to set directly first
-		if dst.Elem().CanSet() {
+		// Check if destination can be set and copied value is valid
+		if dst.Elem().CanSet() && copied.IsValid() {
 			dst.Elem().Set(copied)
-		} else if dst.Elem().CanAddr() && copied.CanAddr() {
-			// For unexported types, use unsafe operations
-			dstPtr := unsafe.Pointer(dst.Elem().UnsafeAddr())
-			srcPtr := unsafe.Pointer(copied.UnsafeAddr())
-			size := copied.Type().Size()
-			copy((*[1 << 30]byte)(dstPtr)[:size], (*[1 << 30]byte)(srcPtr)[:size])
+		} else if copied.IsValid() && dst.Elem().CanAddr() && copied.CanAddr() {
+			// For unexported types or non-settable values, use unsafe operations
+			unsafeCopyValue(dst.Elem(), copied)
 		}
 		return dst
 
