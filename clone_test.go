@@ -1659,6 +1659,41 @@ func TestRedactUnexportedFieldsAdvanced(t *testing.T) {
 		gt.V(t, copied.middle.inner.publicVal).Equal("public-value") // should not change
 		gt.V(t, copied.middle.inner.secret).Equal(originalSecret)    // should remain redacted
 	})
+
+	t.Run("Data preservation: non-addressable values should not cause data loss", func(t *testing.T) {
+		// Test the specific scenario where unsafeCopyValue was causing silent data loss
+		// when called with non-addressable source values
+
+		type innerStruct struct {
+			value string
+		}
+
+		type testStruct struct {
+			inner *innerStruct
+		}
+
+		original := &testStruct{
+			inner: &innerStruct{
+				value: "important-data",
+			},
+		}
+
+		// Use a mask that doesn't filter anything to test pure cloning
+		mask := masq.NewMasq()
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+
+		// Verify that data was preserved, not lost to zero values
+		gt.V(t, copied).NotNil()
+		gt.V(t, copied.inner).NotNil()
+		gt.V(t, copied.inner.value).Equal("important-data")
+
+		// Verify it's a deep copy by modifying original
+		original.inner.value = "modified"
+		gt.V(t, copied.inner.value).Equal("important-data") // should not change
+
+		// Verify they are different objects
+		gt.V(t, copied.inner != original.inner).Equal(true)
+	})
 }
 
 // Types moved from testdata/unexported_structs
