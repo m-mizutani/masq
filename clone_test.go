@@ -1561,6 +1561,104 @@ func TestRedactUnexportedFieldsAdvanced(t *testing.T) {
 		gt.V(t, copied.middle.deep.hidden).Equal("deeply hidden")
 		gt.V(t, copied.middle.deep == original.middle.deep).Equal(false)
 	})
+
+	t.Run("Panic fix: complex nested structures with unexported field reflection", func(t *testing.T) {
+		// This test reproduces the specific panic scenario from the stack trace:
+		// "reflect: reflect.Value.Set using value obtained using unexported field"
+		// The issue occurred when cloning deeply nested structures where cloned values
+		// from unexported fields were being passed to reflect.Value.Set()
+
+		type innerData struct {
+			secret    string // unexported field
+			publicVal string
+		}
+
+		type middleData struct {
+			inner     *innerData // pointer to struct with unexported fields
+			mapData   map[string]*innerData
+			sliceData []*innerData
+		}
+
+		type outerData struct {
+			middle    *middleData // nested pointer structure
+			directMap map[string]*middleData
+		}
+
+		// Create a complex nested structure similar to what caused the panic
+		original := &outerData{
+			middle: &middleData{
+				inner: &innerData{
+					secret:    "secret-value",
+					publicVal: "public-value",
+				},
+				mapData: map[string]*innerData{
+					"key1": {
+						secret:    "map-secret",
+						publicVal: "map-public",
+					},
+				},
+				sliceData: []*innerData{
+					{
+						secret:    "slice-secret",
+						publicVal: "slice-public",
+					},
+				},
+			},
+			directMap: map[string]*middleData{
+				"outer-key": {
+					inner: &innerData{
+						secret:    "outer-secret",
+						publicVal: "outer-public",
+					},
+				},
+			},
+		}
+
+		// Apply redaction that would trigger the problematic code path
+		// Focus on field name redaction since content filters don't work on unexported fields
+		mask := masq.NewMasq(masq.WithFieldName("secret"))
+
+		// This should not panic - the fix ensures that values from unexported fields
+		// are properly handled with CanInterface() checks before calling Set()
+		copied := gt.Cast[*outerData](t, mask.Redact(original))
+
+		// Verify the structure was cloned correctly without panicking
+		gt.V(t, copied).NotNil()
+		gt.V(t, copied.middle).NotNil()
+		gt.V(t, copied.middle.inner).NotNil()
+
+		// Verify the main unexported field was redacted by field name
+		gt.V(t, copied.middle.inner.secret).Equal("[REDACTED]")
+		gt.V(t, copied.middle.inner.publicVal).Equal("public-value")
+
+		// Verify map data structure was preserved (values may not be redacted due to limitations)
+		gt.V(t, copied.middle.mapData).NotNil()
+		gt.V(t, copied.middle.mapData["key1"]).NotNil()
+		gt.V(t, copied.middle.mapData["key1"].publicVal).Equal("map-public")
+
+		// Verify slice data structure was preserved
+		gt.V(t, len(copied.middle.sliceData)).Equal(1)
+		gt.V(t, copied.middle.sliceData[0]).NotNil()
+		gt.V(t, copied.middle.sliceData[0].publicVal).Equal("slice-public")
+
+		// Verify deeply nested map structure was preserved
+		gt.V(t, copied.directMap).NotNil()
+		gt.V(t, copied.directMap["outer-key"]).NotNil()
+		gt.V(t, copied.directMap["outer-key"].inner).NotNil()
+		gt.V(t, copied.directMap["outer-key"].inner.publicVal).Equal("outer-public")
+
+		// The main goal is no panic - ensure original data was not modified
+		gt.V(t, original.middle.inner.secret).Equal("secret-value")
+		gt.V(t, original.middle.mapData["key1"].secret).Equal("map-secret")
+		gt.V(t, original.middle.sliceData[0].secret).Equal("slice-secret")
+		gt.V(t, original.directMap["outer-key"].inner.secret).Equal("outer-secret")
+
+		// Verify deep copying worked by modifying original and checking copied remains unchanged
+		originalSecret := copied.middle.inner.secret
+		original.middle.inner.publicVal = "modified"
+		gt.V(t, copied.middle.inner.publicVal).Equal("public-value") // should not change
+		gt.V(t, copied.middle.inner.secret).Equal(originalSecret)    // should remain redacted
+	})
 }
 
 // Types moved from testdata/unexported_structs

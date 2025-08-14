@@ -171,7 +171,11 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						// For unexported fields containing maps, we need to use unsafe
 						if copied.CanInterface() && dstValue.CanAddr() {
 							dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
-							dstValue.Set(copied)
+							if dstValue.CanSet() {
+								dstValue.Set(copied)
+							} else {
+								unsafeCopyValue(dstValue, copied)
+							}
 						} else if dstValue.CanAddr() && copied.Kind() == reflect.Map {
 							// For maps that can't be set normally, we copy the map reference
 							dstPtr := unsafe.Pointer(dstValue.UnsafeAddr())
@@ -193,7 +197,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						// Set the cloned value to the destination field
 						dstValue = reflect.NewAt(dstValue.Type(), unsafe.Pointer(dstValue.UnsafeAddr())).Elem()
 						// Check if the copied value is valid and can be set
-						if dstValue.CanSet() && copied.IsValid() {
+						if dstValue.CanSet() && copied.IsValid() && copied.CanInterface() {
 							dstValue.Set(copied)
 						} else if copied.IsValid() && copied.CanAddr() && dstValue.CanAddr() {
 							// Use unsafe operations for unexported fields or non-settable values
@@ -243,7 +247,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			copied := x.clone(ctx, f.Name, srcValue, tagValue)
 
 			// Check if we can set the value directly
-			if dstValue.CanSet() {
+			if dstValue.CanSet() && copied.CanInterface() {
 				dstValue.Set(copied)
 			} else if dstValue.CanAddr() {
 				// For unexported fields, we need to use unsafe pointer operations
@@ -254,7 +258,11 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				} else {
 					// Create a new addressable value
 					newVal := reflect.New(copied.Type())
-					newVal.Elem().Set(copied)
+					if copied.CanInterface() {
+						newVal.Elem().Set(copied)
+					} else {
+						unsafeCopyValue(newVal.Elem(), copied)
+					}
 					addrCopied = newVal.Elem()
 				}
 
@@ -309,7 +317,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		for i := 0; i < src.Len(); i++ {
 			cloned := x.clone(ctx, fieldName, src.Index(i), "")
 			dstElem := dst.Index(i)
-			if dstElem.CanSet() && cloned.IsValid() {
+			if dstElem.CanSet() && cloned.IsValid() && cloned.CanInterface() {
 				dstElem.Set(cloned)
 			} else if cloned.IsValid() && dstElem.CanAddr() && cloned.CanAddr() {
 				// Use unsafe operations for unexported elements or non-settable values
@@ -331,7 +339,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			for i := 0; i < src.Len(); i++ {
 				cloned := x.clone(ctx, fieldName, src.Index(i), "")
 				dstElem := dst.Index(i)
-				if dstElem.CanSet() && cloned.IsValid() {
+				if dstElem.CanSet() && cloned.IsValid() && cloned.CanInterface() {
 					dstElem.Set(cloned)
 				} else if cloned.IsValid() && dstElem.CanAddr() && cloned.CanAddr() {
 					// Use unsafe operations for unexported elements or non-settable values
@@ -358,7 +366,11 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 					} else {
 						// If the cloned value is not addressable, create a new addressable value and copy into it.
 						newVal := reflect.New(clonedElem.Type())
-						newVal.Elem().Set(clonedElem)
+						if clonedElem.CanInterface() {
+							newVal.Elem().Set(clonedElem)
+						} else {
+							unsafeCopyValue(newVal.Elem(), clonedElem)
+						}
 						addrCopied = newVal.Elem()
 					}
 
@@ -374,11 +386,25 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		copied := x.clone(ctx, fieldName, src.Elem(), tag)
 
 		// Check if destination can be set and copied value is valid
-		if dst.Elem().CanSet() && copied.IsValid() {
+		// We need to check if copied value came from an unexported field by checking CanInterface
+		if dst.Elem().CanSet() && copied.IsValid() && copied.CanInterface() {
 			dst.Elem().Set(copied)
-		} else if copied.IsValid() && dst.Elem().CanAddr() && copied.CanAddr() {
+		} else if copied.IsValid() && dst.Elem().CanAddr() {
 			// For unexported types or non-settable values, use unsafe operations
-			unsafeCopyValue(dst.Elem(), copied)
+			// Make sure we have an addressable copied value
+			if copied.CanAddr() {
+				unsafeCopyValue(dst.Elem(), copied)
+			} else {
+				// If copied is not addressable, create an addressable copy first
+				addrCopied := reflect.New(copied.Type()).Elem()
+				if copied.CanInterface() {
+					addrCopied.Set(copied)
+				} else {
+					// Use unsafe copy for unexported values
+					unsafeCopyValue(addrCopied, copied)
+				}
+				unsafeCopyValue(dst.Elem(), addrCopied)
+			}
 		}
 		return dst
 
@@ -390,7 +416,12 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 	default:
 		dst := reflect.New(src.Type())
-		dst.Elem().Set(src)
+		if src.CanInterface() {
+			dst.Elem().Set(src)
+		} else {
+			// For unexported types, use unsafe copy
+			unsafeCopyValue(dst.Elem(), src)
+		}
 		return dst.Elem()
 	}
 }
