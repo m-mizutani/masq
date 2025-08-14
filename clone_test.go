@@ -1756,3 +1756,62 @@ func NewMapContainer() *MapContainer {
 		},
 	}
 }
+
+func TestUnexportedFieldHandling(t *testing.T) {
+	t.Run("struct with unexported fields", func(t *testing.T) {
+		type structWithUnexported struct {
+			PublicField  string
+			privateField string
+		}
+
+		original := &structWithUnexported{
+			PublicField:  "public",
+			privateField: "private",
+		}
+
+		mask := masq.NewMasq()
+		// This should not panic
+		cloned := gt.Cast[*structWithUnexported](t, mask.Redact(original))
+
+		gt.V(t, cloned.PublicField).Equal("public")
+		// Main goal: no panic during cloning
+	})
+
+	t.Run("slice with unexported element type", func(t *testing.T) {
+		type unexportedStruct struct {
+			value string
+		}
+
+		original := []unexportedStruct{
+			{value: "item1"},
+			{value: "item2"},
+		}
+
+		mask := masq.NewMasq()
+		// This should not panic
+		cloned := gt.Cast[[]unexportedStruct](t, mask.Redact(original))
+
+		gt.V(t, len(cloned)).Equal(2)
+	})
+
+	t.Run("pointer to unexported struct field", func(t *testing.T) {
+		type unexportedStruct struct {
+			content string
+		}
+
+		type container struct {
+			Data *unexportedStruct
+		}
+
+		original := &container{
+			Data: &unexportedStruct{content: "test"},
+		}
+
+		mask := masq.NewMasq()
+		// This should not panic
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		gt.V(t, cloned.Data).NotNil()
+		// Main goal: no panic during cloning
+	})
+}
