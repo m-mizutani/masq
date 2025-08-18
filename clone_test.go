@@ -2,12 +2,16 @@ package masq_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"reflect"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/m-mizutani/gt"
 	"github.com/m-mizutani/masq"
@@ -1947,4 +1951,875 @@ func TestUnexportedFieldHandling(t *testing.T) {
 		gt.V(t, cloned.Data).NotNil()
 		// Main goal: no panic during cloning
 	})
+}
+
+// Custom types to test default case behavior for uintptr panic fix
+type defaultCaseCustomUint uint
+type defaultCaseCustomInt int
+type defaultCaseCustomFloat float64
+
+
+// TestDefaultCaseUnexportedFieldPanicFix tests that types reaching default case don't panic
+func TestDefaultCaseUnexportedFieldPanicFix(t *testing.T) {
+	tests := []struct {
+		name string
+		data interface{}
+	}{
+		{
+			name: "unexported uintptr field",
+			data: &struct {
+				PublicField string
+				ptr         uintptr // uintptr reaches default case
+			}{
+				PublicField: "public",
+				ptr:         uintptr(unsafe.Pointer(&struct{}{})),
+			},
+		},
+		{
+			name: "custom uint types",
+			data: &struct {
+				PublicField     string
+				customUint      defaultCaseCustomUint  // custom types reach default case
+				customInt       defaultCaseCustomInt
+				customFloat     defaultCaseCustomFloat
+			}{
+				PublicField: "public",
+				customUint:  defaultCaseCustomUint(42),
+				customInt:   defaultCaseCustomInt(24),
+				customFloat: defaultCaseCustomFloat(3.14),
+			},
+		},
+		{
+			name: "uintptr in nested struct",
+			data: &struct {
+				PublicField string
+				nested      struct {
+					ptr uintptr // nested unexported uintptr
+				}
+			}{
+				PublicField: "public",
+				nested: struct {
+					ptr uintptr
+				}{
+					ptr: uintptr(unsafe.Pointer(&struct{}{})),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+				ReplaceAttr: masq.New(),
+			}))
+
+			// This should not panic with the fix
+			logger.Info("test message", "data", tt.data)
+
+			// Just ensure we get some log output
+			output := buf.String()
+			if len(output) == 0 {
+				t.Error("Expected log output, got empty string")
+			}
+			t.Logf("Log output: %s", output)
+		})
+	}
+}
+
+// TestDefaultCaseValueCopyBehaviorAfterFix verifies that values are properly copied in default case
+func TestDefaultCaseValueCopyBehaviorAfterFix(t *testing.T) {
+	// Create a struct with uintptr that would trigger default case
+	original := &struct {
+		PublicField string
+		ptr         uintptr
+	}{
+		PublicField: "test",
+		ptr:         uintptr(123), // Simple value for testing
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	// This should succeed without panic
+	logger.Info("test message", "data", original)
+
+	output := buf.String()
+	t.Logf("Log output: %s", output)
+
+	// Verify that the public field is logged correctly
+	if !bytes.Contains([]byte(output), []byte("test")) {
+		t.Error("Expected 'test' to be in the output")
+	}
+}
+
+// TestDefaultCaseWithFilteringAfterFix tests that filtering still works for default case types
+func TestDefaultCaseWithFilteringAfterFix(t *testing.T) {
+	type structWithFilterableUintptr struct {
+		PublicField string
+		secret      uintptr // unexported field that should be filtered by name
+	}
+
+	original := &structWithFilterableUintptr{
+		PublicField: "public",
+		secret:      uintptr(123),
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(
+			masq.WithFieldName("secret"), // Filter by field name
+		),
+	}))
+
+	logger.Info("test message", "data", original)
+
+	output := buf.String()
+	t.Logf("Log output: %s", output)
+
+	// The output should contain the public field but the secret field should be filtered
+	if !bytes.Contains([]byte(output), []byte("public")) {
+		t.Error("Expected 'public' to be in the output")
+	}
+}
+
+
+// TestAllPotentialPanicCases tests comprehensive panic prevention
+func TestAllPotentialPanicCases(t *testing.T) {
+	tests := []struct {
+		name string
+		data interface{}
+	}{
+		// 1. Function types in unexported fields
+		{
+			name: "unexported function field",
+			data: &struct {
+				PublicField string
+				fn          func() string // function type
+			}{
+				PublicField: "public",
+				fn:          func() string { return "test" },
+			},
+		},
+		// 2. Channel types in unexported fields
+		{
+			name: "unexported channel field",
+			data: &struct {
+				PublicField string
+				ch          chan int // channel type
+			}{
+				PublicField: "public",
+				ch:          make(chan int),
+			},
+		},
+		// 3. Nil channel in unexported field
+		{
+			name: "nil channel in unexported field",
+			data: &struct {
+				PublicField string
+				ch          chan int // nil channel
+			}{
+				PublicField: "public",
+				ch:          nil,
+			},
+		},
+		// 4. Context types (interface with unexported methods)
+		{
+			name: "context in unexported field",
+			data: &struct {
+				PublicField string
+				ctx         context.Context // context interface
+			}{
+				PublicField: "public",
+				ctx:         context.Background(),
+			},
+		},
+		// 5. Sync types with unexported fields
+		{
+			name: "mutex in unexported field",
+			data: &struct {
+				PublicField string
+				mu          sync.Mutex // sync.Mutex has unexported fields
+			}{
+				PublicField: "public",
+				mu:          sync.Mutex{},
+			},
+		},
+		// 6. WaitGroup in unexported field
+		{
+			name: "waitgroup in unexported field",
+			data: &struct {
+				PublicField string
+				wg          sync.WaitGroup // sync.WaitGroup has unexported fields
+			}{
+				PublicField: "public",
+				wg:          sync.WaitGroup{},
+			},
+		},
+		// 7. Complex nested structures with mixed types
+		{
+			name: "complex nested with multiple types",
+			data: &struct {
+				PublicField string
+				nested      struct {
+					fn   func() int
+					ch   chan string
+					ptr  uintptr
+					time time.Time
+				}
+			}{
+				PublicField: "public",
+				nested: struct {
+					fn   func() int
+					ch   chan string
+					ptr  uintptr
+					time time.Time
+				}{
+					fn:   func() int { return 42 },
+					ch:   make(chan string),
+					ptr:  uintptr(123),
+					time: time.Now(),
+				},
+			},
+		},
+		// 8. Array of structs with unexported fields
+		{
+			name: "array of structs with unexported fields",
+			data: &struct {
+				PublicField string
+				items       [3]struct {
+					id    int
+					value uintptr
+				}
+			}{
+				PublicField: "public",
+				items: [3]struct {
+					id    int
+					value uintptr
+				}{
+					{id: 1, value: uintptr(100)},
+					{id: 2, value: uintptr(200)},
+					{id: 3, value: uintptr(300)},
+				},
+			},
+		},
+		// 9. Slice of complex types
+		{
+			name: "slice of complex types",
+			data: &struct {
+				PublicField string
+				items       []struct {
+					fn  func() string
+					ptr uintptr
+				}
+			}{
+				PublicField: "public",
+				items: []struct {
+					fn  func() string
+					ptr uintptr
+				}{
+					{
+						fn:  func() string { return "test1" },
+						ptr: uintptr(unsafe.Pointer(&struct{}{})),
+					},
+					{
+						fn:  func() string { return "test2" },
+						ptr: uintptr(unsafe.Pointer(&struct{}{})),
+					},
+				},
+			},
+		},
+		// 10. Map with complex key and value types
+		{
+			name: "map with complex types",
+			data: &struct {
+				PublicField string
+				mapping     map[string]struct {
+					ch   chan int
+					ptr  uintptr
+					time time.Time
+				}
+			}{
+				PublicField: "public",
+				mapping: map[string]struct {
+					ch   chan int
+					ptr  uintptr
+					time time.Time
+				}{
+					"key1": {
+						ch:   make(chan int),
+						ptr:  uintptr(123),
+						time: time.Now(),
+					},
+				},
+			},
+		},
+		// 11. Interface containing struct with unexported fields
+		{
+			name: "interface with unexported struct",
+			data: &struct {
+				PublicField string
+				iface       interface{}
+			}{
+				PublicField: "public",
+				iface: struct {
+					hidden uintptr
+					fn     func() int
+				}{
+					hidden: uintptr(456),
+					fn:     func() int { return 789 },
+				},
+			},
+		},
+		// 12. Embedded struct with unexported fields
+		{
+			name: "embedded struct with unexported fields",
+			data: &struct {
+				PublicField string
+				embedded    struct {
+					hiddenUint    uint
+					hiddenUintptr uintptr
+					hiddenFunc    func() bool
+					hiddenChan    chan string
+				}
+			}{
+				PublicField: "public",
+				embedded: struct {
+					hiddenUint    uint
+					hiddenUintptr uintptr
+					hiddenFunc    func() bool
+					hiddenChan    chan string
+				}{
+					hiddenUint:    42,
+					hiddenUintptr: uintptr(unsafe.Pointer(&struct{}{})),
+					hiddenFunc:    func() bool { return true },
+					hiddenChan:    make(chan string),
+				},
+			},
+		},
+		// 13. Nil interface in unexported field
+		{
+			name: "nil interface in unexported field",
+			data: &struct {
+				PublicField string
+				nilIface    interface{}
+			}{
+				PublicField: "public",
+				nilIface:    nil,
+			},
+		},
+		// 14. Time with location (has unexported fields)
+		{
+			name: "time with location",
+			data: &struct {
+				PublicField string
+				timestamp   time.Time
+			}{
+				PublicField: "public",
+				timestamp:   time.Now().In(time.UTC),
+			},
+		},
+		// 15. Reflect types
+		{
+			name: "reflect types",
+			data: &struct {
+				PublicField string
+				reflectVal  reflect.Value
+				reflectType reflect.Type
+				unsafePtr   unsafe.Pointer
+			}{
+				PublicField: "reflect_test",
+				reflectVal:  reflect.ValueOf("test"),
+				reflectType: reflect.TypeOf("test"),
+				unsafePtr:   unsafe.Pointer(&struct{}{}),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Panic in test '%s': %v", tt.name, r)
+				}
+			}()
+
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+				ReplaceAttr: masq.New(),
+			}))
+
+			logger.Info("comprehensive test", "data", tt.data)
+
+			output := buf.String()
+			if len(output) == 0 {
+				t.Error("Expected log output, got empty string")
+			}
+		})
+	}
+}
+
+// TestLargeStructsWithUnexportedFields tests with large structures
+func TestLargeStructsWithUnexportedFields(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred in large struct test: %v", r)
+		}
+	}()
+
+	// Large array to test memory handling
+	type LargeStruct struct {
+		PublicField string
+		largeArray  [1000]struct {
+			value    uintptr
+			counter  uint64
+			flag     bool
+			data     [100]byte
+		}
+		bigSlice []struct {
+			ptr uintptr
+			fn  func() int
+		}
+	}
+
+	// Create large slice
+	bigSlice := make([]struct {
+		ptr uintptr
+		fn  func() int
+	}, 100)
+
+	for i := range bigSlice {
+		bigSlice[i] = struct {
+			ptr uintptr
+			fn  func() int
+		}{
+			ptr: uintptr(i * 100),
+			fn:  func() int { return i },
+		}
+	}
+
+	data := &LargeStruct{
+		PublicField: "large_struct",
+		bigSlice:    bigSlice,
+	}
+
+	// Initialize large array
+	for i := range data.largeArray {
+		data.largeArray[i] = struct {
+			value    uintptr
+			counter  uint64
+			flag     bool
+			data     [100]byte
+		}{
+			value:   uintptr(i),
+			counter: uint64(i * 2),
+			flag:    i%2 == 0,
+		}
+		// Fill data array
+		for j := range data.largeArray[i].data {
+			data.largeArray[i].data[j] = byte(j % 256)
+		}
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	logger.Info("large struct test", "data", data)
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("Expected log output, got empty string")
+	}
+	t.Logf("Output length: %d bytes", len(output))
+}
+
+// TestReflectionBoundaryConditions tests edge cases with reflection
+func TestReflectionBoundaryConditions(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred in reflection boundary test: %v", r)
+		}
+	}()
+
+	tests := []struct {
+		name string
+		data interface{}
+	}{
+		// Test with reflect.Value as unexported field
+		{
+			name: "struct with reflect.Value",
+			data: &struct {
+				PublicField string
+				reflectVal  reflect.Value
+			}{
+				PublicField: "reflect_test",
+				reflectVal:  reflect.ValueOf("hidden"),
+			},
+		},
+		// Test with reflect.Type as unexported field
+		{
+			name: "struct with reflect.Type",
+			data: &struct {
+				PublicField string
+				reflectType reflect.Type
+			}{
+				PublicField: "type_test",
+				reflectType: reflect.TypeOf("string"),
+			},
+		},
+		// Test with method values
+		{
+			name: "struct with method value",
+			data: &struct {
+				PublicField string
+				method      func() string
+			}{
+				PublicField: "method_test",
+				method:      func() string { return "method_value" },
+			},
+		},
+		// Test with unsafe.Pointer directly
+		{
+			name: "struct with unsafe.Pointer",
+			data: &struct {
+				PublicField string
+				unsafePtr   unsafe.Pointer
+			}{
+				PublicField: "unsafe_test",
+				unsafePtr:   unsafe.Pointer(&struct{}{}),
+			},
+		},
+		// Test with multiple uintptr fields
+		{
+			name: "struct with multiple uintptr fields",
+			data: &struct {
+				PublicField string
+				ptr1        uintptr
+				ptr2        uintptr
+				ptr3        uintptr
+				ptr4        uintptr
+			}{
+				PublicField: "multi_ptr_test",
+				ptr1:        uintptr(100),
+				ptr2:        uintptr(200),
+				ptr3:        uintptr(300),
+				ptr4:        uintptr(400),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Panic in subtest '%s': %v", tt.name, r)
+				}
+			}()
+
+			var buf bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+				ReplaceAttr: masq.New(),
+			}))
+
+			logger.Info("reflection boundary test", "data", tt.data)
+
+			output := buf.String()
+			if len(output) == 0 {
+				t.Error("Expected log output, got empty string")
+			}
+		})
+	}
+}
+
+// TestCircularReferenceWithUnexportedFields tests circular references
+func TestCircularReferenceWithUnexportedFields(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred in circular reference test: %v", r)
+		}
+	}()
+
+	type Node struct {
+		PublicField string
+		parent      *Node // unexported field
+		children    []*Node
+		data        struct {
+			value uintptr
+			fn    func() string
+		}
+	}
+
+	root := &Node{
+		PublicField: "root",
+		children:    make([]*Node, 0),
+		data: struct {
+			value uintptr
+			fn    func() string
+		}{
+			value: uintptr(123),
+			fn:    func() string { return "root" },
+		},
+	}
+
+	child1 := &Node{
+		PublicField: "child1",
+		parent:      root,
+		data: struct {
+			value uintptr
+			fn    func() string
+		}{
+			value: uintptr(456),
+			fn:    func() string { return "child1" },
+		},
+	}
+
+	root.children = []*Node{child1}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	logger.Info("circular reference test", "data", root)
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("Expected log output, got empty string")
+	}
+}
+
+// TestConcurrentAccess tests concurrent access to structures with unexported fields
+func TestConcurrentAccess(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred with concurrent access: %v", r)
+		}
+	}()
+
+	type ConcurrentStruct struct {
+		PublicField string
+		counter     uint64
+		ptr         uintptr
+		fn          func() string
+	}
+
+	data := &ConcurrentStruct{
+		PublicField: "concurrent",
+		counter:     42,
+		ptr:         uintptr(unsafe.Pointer(&struct{}{})),
+		fn:          func() string { return "concurrent" },
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	// Test concurrent logging
+	done := make(chan bool, 5)
+
+	for i := 0; i < 5; i++ {
+		go func(id int) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Panic in goroutine %d: %v", id, r)
+				}
+				done <- true
+			}()
+
+			logger.Info("concurrent test", "goroutine", id, "data", data)
+		}(i)
+	}
+
+	// Wait for all goroutines
+	for i := 0; i < 5; i++ {
+		<-done
+	}
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("Expected log output, got empty string")
+	}
+}
+
+// TestMemoryPressureWithUnexportedFields tests under memory pressure
+func TestMemoryPressureWithUnexportedFields(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred under memory pressure: %v", r)
+		}
+	}()
+
+	// Create multiple structures simultaneously
+	type MemoryTestStruct struct {
+		PublicField string
+		data        []struct {
+			ptr     uintptr
+			fn      func() string
+			counter uint64
+		}
+	}
+
+	var structs []*MemoryTestStruct
+
+	for i := 0; i < 100; i++ {
+		data := make([]struct {
+			ptr     uintptr
+			fn      func() string
+			counter uint64
+		}, 50)
+
+		for j := range data {
+			data[j] = struct {
+				ptr     uintptr
+				fn      func() string
+				counter uint64
+			}{
+				ptr:     uintptr(unsafe.Pointer(&structs)),
+				fn:      func() string { return "test" },
+				counter: uint64(j),
+			}
+		}
+
+		structs = append(structs, &MemoryTestStruct{
+			PublicField: "memory_test",
+			data:        data,
+		})
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	// Log all structures
+	for i, s := range structs {
+		logger.Info("memory test", "index", i, "data", s)
+	}
+
+	// Force garbage collection
+	runtime.GC()
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("Expected log output, got empty string")
+	}
+	t.Logf("Output length: %d bytes", len(output))
+}
+
+// TestExtremeNestingDepth tests very deep nesting beyond normal limits
+func TestExtremeNestingDepth(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred with extreme nesting: %v", r)
+		}
+	}()
+
+	// Create deeply nested structure programmatically
+	type DeepStruct struct {
+		PublicField string
+		level       interface{}
+	}
+
+	// Build nested structure
+	var current interface{} = struct {
+		value uintptr
+		fn    func() int
+	}{
+		value: uintptr(999),
+		fn:    func() int { return 999 },
+	}
+
+	// Create 50 levels of nesting
+	for i := 0; i < 50; i++ {
+		current = &DeepStruct{
+			PublicField: "deep",
+			level:       current,
+		}
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	logger.Info("extreme nesting test", "data", current)
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("Expected log output, got empty string")
+	}
+	t.Logf("Output length: %d bytes", len(output))
+}
+
+// TestSpecialGoTypes tests special Go types that might cause issues
+func TestSpecialGoTypes(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Panic occurred in special Go types test: %v", r)
+		}
+	}()
+
+	// Test with string header (internal representation)
+	type StringHeader struct {
+		PublicField string
+		header      struct {
+			data uintptr
+			len  int
+		}
+	}
+
+	// Test with slice header (internal representation)
+	type SliceHeader struct {
+		PublicField string
+		header      struct {
+			data uintptr
+			len  int
+			cap  int
+		}
+	}
+
+	tests := []interface{}{
+		&StringHeader{
+			PublicField: "string_header",
+			header: struct {
+				data uintptr
+				len  int
+			}{
+				data: uintptr(unsafe.Pointer(&[]byte("test")[0])),
+				len:  4,
+			},
+		},
+		&SliceHeader{
+			PublicField: "slice_header",
+			header: struct {
+				data uintptr
+				len  int
+				cap  int
+			}{
+				data: uintptr(unsafe.Pointer(&[]int{1, 2, 3}[0])),
+				len:  3,
+				cap:  3,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
+		ReplaceAttr: masq.New(),
+	}))
+
+	for i, data := range tests {
+		logger.Info("special Go types test", "index", i, "data", data)
+	}
+
+	output := buf.String()
+	if len(output) == 0 {
+		t.Error("Expected log output, got empty string")
+	}
+	t.Logf("Log output length: %d", len(output))
 }

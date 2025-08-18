@@ -162,10 +162,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 								_ = x.defaultRedactor(srcValue, dst)
 							}
 							// Copy the redacted value safely
-							if !safeCopyValue(dstValue, dst.Elem()) {
-								// If we can't copy, use zero value
-								_ = 0 // Explicit no-op to satisfy linter
-							}
+							safeCopyValue(dstValue, dst.Elem())
 							break
 						}
 					}
@@ -224,10 +221,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 								dstValue.Set(copied)
 							} else {
 								// Use safeCopyValue for proper fallback handling
-								if !safeCopyValue(dstValue, copied) {
-									// If we can't copy, leave as zero value
-									_ = 0 // Explicit no-op to satisfy linter
-								}
+								safeCopyValue(dstValue, copied)
 							}
 						} else if dstValue.CanAddr() && copied.Kind() == reflect.Map {
 							// For maps that can't be set normally, we copy the map reference
@@ -276,16 +270,8 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						}
 						continue
 					default:
-						// For unsupported types, try to use reflection methods
-						if srcValue.CanInt() {
-							dstValue.SetInt(srcValue.Int())
-						} else if srcValue.CanUint() {
-							dstValue.SetUint(srcValue.Uint())
-						} else if srcValue.CanFloat() {
-							dstValue.SetFloat(srcValue.Float())
-						} else if srcValue.CanComplex() {
-							dstValue.SetComplex(srcValue.Complex())
-						}
+						// For unsupported types, use safe copy to avoid panics with unexported fields
+						safeCopyValue(dstValue, srcValue)
 					}
 				} else {
 					// If not addressable, we need to handle it carefully
@@ -305,12 +291,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			} else if dstValue.CanAddr() {
 				// For unexported fields, we need to use unsafe pointer operations
 				// Try to copy directly to dstValue first
-				if !safeCopyValue(dstValue, copied) {
-					// If safeCopyValue failed, we can't copy the data
-					// This is a fundamental limitation of Go's reflection for unexported fields
-					// dstValue will remain as its zero value
-					_ = 0 // Explicit no-op to satisfy linter
-				}
+				safeCopyValue(dstValue, copied)
 			}
 		}
 
@@ -404,11 +385,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 				// The element in the array is not settable, so we must use unsafe to copy the cloned value back.
 				if elemValue.CanAddr() {
-					if !safeCopyValue(elemValue, clonedElem) {
-						// If we can't copy the data, we have to leave it as zero value
-						// This is a fundamental limitation of Go's reflection for unexported fields
-						_ = 0 // Explicit no-op to satisfy linter
-					}
+					safeCopyValue(elemValue, clonedElem)
 				}
 			}
 		}
@@ -431,12 +408,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 			} else {
 				// If copied is not addressable, we need to handle this carefully
 				// to avoid silent data loss
-				if !safeCopyValue(dst.Elem(), copied) {
-					// For non-addressable unexported values, we cannot safely copy the data
-					// This is a fundamental limitation - we'll have to use zero value
-					// The zero value is already set by reflect.New().Elem()
-					_ = 0 // Explicit no-op to satisfy linter
-				}
+				safeCopyValue(dst.Elem(), copied)
 			}
 		}
 		return dst
@@ -449,11 +421,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 	default:
 		dst := reflect.New(src.Type())
-		if !safeCopyValue(dst.Elem(), src) {
-			// If we can't copy the data, leave as zero value
-			// This is a fundamental limitation of Go's reflection for unexported fields
-			_ = 0 // Explicit no-op to satisfy linter
-		}
+		safeCopyValue(dst.Elem(), src)
 		return dst.Elem()
 	}
 }
