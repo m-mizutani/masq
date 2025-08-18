@@ -1958,11 +1958,6 @@ type defaultCaseCustomUint uint
 type defaultCaseCustomInt int
 type defaultCaseCustomFloat float64
 
-// Custom types for comprehensive panic testing
-type panicTestCustomBool bool
-type panicTestCustomString string
-type panicTestCustomBytes []byte
-type panicTestCustomRune rune
 
 // TestDefaultCaseUnexportedFieldPanicFix tests that types reaching default case don't panic
 func TestDefaultCaseUnexportedFieldPanicFix(t *testing.T) {
