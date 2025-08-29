@@ -544,6 +544,36 @@ func TestMapWithStructValues(t *testing.T) {
 	gt.V(t, item1.value).Equal(100)
 }
 
+// TestMapValueRedaction tests map value redaction with tagged fields
+func TestMapValueRedaction(t *testing.T) {
+	type Trigger struct {
+		Id string `masq:"secret"`
+	}
+
+	createMap := func() map[string]Trigger {
+		return map[string]Trigger{
+			"example-key": {
+				Id: "example-id",
+			},
+		}
+	}
+
+	m := masq.New(masq.WithTag("secret"))
+	attr := slog.Attr{
+		Key:   "masq",
+		Value: slog.AnyValue(createMap()),
+	}
+
+	result := m(nil, attr)
+
+	// Get the redacted map from the result
+	redactedMap := gt.Cast[map[string]Trigger](t, result.Value.Any())
+
+	gt.V(t, len(redactedMap)).Equal(1)
+	trigger := redactedMap["example-key"]
+	gt.V(t, trigger.Id).Equal("[REDACTED]")
+}
+
 func TestMapWithUnexportedTypes(t *testing.T) {
 	t.Run("maps with unexported types have limitations", func(t *testing.T) {
 		// This test demonstrates the limitation mentioned in README.md
@@ -1958,7 +1988,6 @@ type defaultCaseCustomUint uint
 type defaultCaseCustomInt int
 type defaultCaseCustomFloat float64
 
-
 // TestDefaultCaseUnexportedFieldPanicFix tests that types reaching default case don't panic
 func TestDefaultCaseUnexportedFieldPanicFix(t *testing.T) {
 	tests := []struct {
@@ -1978,10 +2007,10 @@ func TestDefaultCaseUnexportedFieldPanicFix(t *testing.T) {
 		{
 			name: "custom uint types",
 			data: &struct {
-				PublicField     string
-				customUint      defaultCaseCustomUint  // custom types reach default case
-				customInt       defaultCaseCustomInt
-				customFloat     defaultCaseCustomFloat
+				PublicField string
+				customUint  defaultCaseCustomUint // custom types reach default case
+				customInt   defaultCaseCustomInt
+				customFloat defaultCaseCustomFloat
 			}{
 				PublicField: "public",
 				customUint:  defaultCaseCustomUint(42),
@@ -2084,7 +2113,6 @@ func TestDefaultCaseWithFilteringAfterFix(t *testing.T) {
 		t.Error("Expected 'public' to be in the output")
 	}
 }
-
 
 // TestAllPotentialPanicCases tests comprehensive panic prevention
 func TestAllPotentialPanicCases(t *testing.T) {
@@ -2373,10 +2401,10 @@ func TestLargeStructsWithUnexportedFields(t *testing.T) {
 	type LargeStruct struct {
 		PublicField string
 		largeArray  [1000]struct {
-			value    uintptr
-			counter  uint64
-			flag     bool
-			data     [100]byte
+			value   uintptr
+			counter uint64
+			flag    bool
+			data    [100]byte
 		}
 		bigSlice []struct {
 			ptr uintptr
@@ -2408,10 +2436,10 @@ func TestLargeStructsWithUnexportedFields(t *testing.T) {
 	// Initialize large array
 	for i := range data.largeArray {
 		data.largeArray[i] = struct {
-			value    uintptr
-			counter  uint64
-			flag     bool
-			data     [100]byte
+			value   uintptr
+			counter uint64
+			flag    bool
+			data    [100]byte
 		}{
 			value:   uintptr(i),
 			counter: uint64(i * 2),

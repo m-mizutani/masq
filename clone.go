@@ -303,11 +303,11 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 		// Check if the map key type is unexported
 		keyType := mapType.Key()
-		isUnexportedKeyType := keyType.PkgPath() != ""
+		isUnexportedKeyType := isUnexported(keyType)
 
 		// Check if the map value type is unexported
 		valueType := mapType.Elem()
-		isUnexportedValueType := valueType.PkgPath() != ""
+		isUnexportedValueType := isUnexported(valueType)
 
 		// If map has unexported key or value type, return the original map
 		// This is a limitation due to Go's reflection API
@@ -424,4 +424,24 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		safeCopyValue(dst.Elem(), src)
 		return dst.Elem()
 	}
+}
+
+// isUnexported checks if a type is truly unexported.
+// Unlike checking PkgPath() != "", this function correctly identifies
+// built-in types and exported user-defined types.
+func isUnexported(t reflect.Type) bool {
+	// Built-in types (like string, int, etc.) have empty PkgPath and are always exported
+	if t.PkgPath() == "" {
+		return false
+	}
+
+	// For types with package path, check if the type name starts with lowercase
+	// Only types starting with lowercase are truly unexported
+	name := t.Name()
+	if len(name) > 0 && name[0] >= 'a' && name[0] <= 'z' {
+		return true
+	}
+
+	// For named types starting with uppercase, they are exported
+	return false
 }
