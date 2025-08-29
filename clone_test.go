@@ -550,18 +550,14 @@ func TestMapValueRedaction(t *testing.T) {
 		Id string `masq:"secret"`
 	}
 
-	createMap := func() map[string]Trigger {
-		return map[string]Trigger{
+	m := masq.New(masq.WithTag("secret"))
+	attr := slog.Attr{
+		Key: "masq",
+		Value: slog.AnyValue(map[string]Trigger{
 			"example-key": {
 				Id: "example-id",
 			},
-		}
-	}
-
-	m := masq.New(masq.WithTag("secret"))
-	attr := slog.Attr{
-		Key:   "masq",
-		Value: slog.AnyValue(createMap()),
+		}),
 	}
 
 	result := m(nil, attr)

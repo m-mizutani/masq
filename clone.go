@@ -3,6 +3,7 @@ package masq
 import (
 	"context"
 	"reflect"
+	"unicode"
 	"unsafe"
 )
 
@@ -435,13 +436,7 @@ func isUnexported(t reflect.Type) bool {
 		return false
 	}
 
-	// For types with package path, check if the type name starts with lowercase
-	// Only types starting with lowercase are truly unexported
 	name := t.Name()
-	if len(name) > 0 && name[0] >= 'a' && name[0] <= 'z' {
-		return true
-	}
-
-	// For named types starting with uppercase, they are exported
-	return false
+	// For named types, an unexported name starts with a lowercase letter.
+	return name != "" && unicode.IsLower(rune(name[0]))
 }
