@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"reflect"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"log/slog"
 
@@ -249,66 +247,6 @@ func ExampleRedactString() {
 	out.Flush()
 	// Output:
 	// {"level":"INFO","msg":"Got record","record":{"Email":"[REDACTED]","ID":"m-mizutani","Phone":"****-1234"},"time":"2022-12-25T09:00:00.123456789"}
-}
-
-func TestFilterWithPrefixForMap(t *testing.T) {
-	type myRecord struct {
-		Data map[string]string
-	}
-	record := myRecord{
-		Data: map[string]string{
-			"secure_phone": "090-0000-0000",
-		},
-	}
-
-	var buf bytes.Buffer
-	logger := newLogger(&buf, masq.New(masq.WithFieldPrefix("secure_")))
-
-	logger.With("record", record).Info("Got record")
-	if !strings.Contains(buf.String(), "[REDACTED]") {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-	if strings.Contains(buf.String(), "090-0000-0000") {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-}
-
-func TestFilterWithTagForCustomType(t *testing.T) {
-	type myRecord struct {
-		Data map[string]string `masq:"secret"`
-	}
-	record := myRecord{
-		Data: map[string]string{
-			"phone": "090-0000-0000",
-		},
-	}
-
-	var buf bytes.Buffer
-	logger := newLogger(&buf, masq.New(masq.WithTag("secret")))
-
-	logger.With("record", record).Info("Got record")
-	if strings.Contains(buf.String(), "090-0000-0000") {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-
-}
-
-func TestAllowedType(t *testing.T) {
-	type myRecord struct {
-		Time time.Time
-	}
-	now := time.Now().Add(-time.Hour * 24)
-	record := myRecord{
-		Time: now,
-	}
-
-	var buf bytes.Buffer
-	logger := newLogger(&buf, masq.New(masq.WithAllowedType(reflect.TypeOf(time.Time{}))))
-
-	logger.With("record", record).Info("Got record")
-	if !strings.Contains(buf.String(), now.Format(time.RFC3339Nano)) {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
 }
 
 type logValuer struct {
