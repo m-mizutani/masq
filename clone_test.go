@@ -544,9 +544,6 @@ func TestMapWithStructValues(t *testing.T) {
 	gt.V(t, item1.value).Equal(100)
 }
 
-type unexportedMapType map[string]string
-type exportedMapType map[string]string
-
 func TestMapWithUnexportedTypes(t *testing.T) {
 	t.Run("maps with unexported types have limitations", func(t *testing.T) {
 		// This test demonstrates the limitation mentioned in README.md
