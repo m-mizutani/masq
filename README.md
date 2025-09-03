@@ -279,15 +279,24 @@ Notes:
 Example-first summary (what is copied vs kept as-is):
 
 ```go
+type unexportedMapType map[string]string
+type exportedMapType map[string]string
+
 type CloneCase struct {
     // Arrays / Slices
     Items []privateData            // ✅ Cloned recursively (unexported element types OK)
 
     // Maps
-    A map[string]*privateData      // ✅ Map cloned; elements deep-cloned when filters match
+    A map[string]*privateData      // ✅ Map cloned; elements are reallocated as new pointers
     B map[string]privateData       // ❌ Returned as-is (unexported non-pointer value type)
     C map[unexportedKey]string     // ❌ Returned as-is (unexported key type)
     d map[string]string            // ❌ Returned as-is (map in unexported field)
+
+    // Embedded Types
+    unexportedMapType              // ❌ Returned as-is (embedded unexported map type)
+    ExportedMapType                // ✅ Map cloned (embedded exported map type)
+    hiddenCredentials              // ❌ Embedded unexported struct: fields not redacted
+    PublicCredentials              // ✅ Embedded exported struct: fields processed normally
 
     // Pointers
     Cred *cred                     // ✅ New allocation; pointed-to values processed recursively
@@ -296,13 +305,14 @@ type CloneCase struct {
 
 Notes:
 - Arrays/slices are cloned and processed recursively, even with unexported element types.
-- Maps are cloned when both key and value types pass the `isUnexported()` check. Pointer types (`*T`) are considered exported even when `T` is unexported.
-- Maps with unexported non-pointer value types or unexported key types are returned as-is.
+- Maps are cloned when key and value types are exported, or when the value type is a pointer (`*T`). Pointer types are considered exported even if `T` is unexported.
+- Maps are returned as-is when the key or value type is an unexported non-pointer type, or when the map resides in an unexported struct field (cannot be safely interfaced).
 - Pointers are cloned with new allocation; pointed-to values are processed recursively.
 
 ### Recommendations
 - For unexported fields, prefer tag, field name, or prefix filters.
 - If a map must contain unexported types, use pointer values (e.g., `map[string]*T`) to enable cloning.
+- **Avoid unexported embedded map types** for sensitive data; use exported embedded types or regular struct fields instead.
 - Prefer storing sensitive data in structs or slices rather than maps when possible.
 
 ## License
