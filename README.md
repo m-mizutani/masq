@@ -248,67 +248,73 @@ out.Flush()
 
 ## Limitations
 
-Due to Go's reflection constraints, certain types cannot be properly handled by `masq`. These types will not appear in log outputs.
+`masq` uses reflection to traverse and process values. The behavior is easiest to understand from two perspectives: Redaction (what gets masked) and Cloning (what gets copied vs kept as-is).
 
-### ❌ Maps with unexported or un-interfaceable types
-
-Due to Go's reflection API limitations, `masq` cannot properly clone maps in the following cases:
-
-1. **Maps with unexported key or value types**: When the map's key or value type is defined in another package and not exported.
-2. **Maps containing un-interfaceable keys or values**: Even with exported types, some values may not be accessible via `CanInterface()` due to how they were created or their context.
-
-For example:
+### Redaction
+Example-first summary (what gets masked vs not):
 
 ```go
-type privateData struct {
-    id string
-}
+type RedactionCase struct {
+    // Fields
+    Password string `masq:"secret"` // ✅ Redacted (exported; tag/type/content apply)
+    password string `masq:"secret"` // ✅ Redacted (unexported; tag/name/prefix only)
+    apiKey   string                  // ✅ Redacted by name/prefix; ❌ not by content/type
 
-type Container struct {
-    // Cannot be cloned due to unexported types
-    dataMap    map[string]privateData  // Unexported value type
-    pointerMap map[string]*privateData // Pointer to unexported type
-    privateKey map[privateData]string  // Unexported key type
-    
-    // May not be cloneable if keys/values are un-interfaceable
-    complexMap map[interface{}]interface{}
+    // Maps
+    Users   map[string]*privateUser  // ✅ Elements redacted when filters match
+    Data    map[string]privateData   // ❌ Values not inspected (unexported non-pointer value type)
+    secrets map[string]string        // ❌ Not inspected (map in unexported field)
+
+    // Interface
+    anyValue interface{}             // ❌ Not inspected by type/content; name/tag/prefix on the field applies
 }
 ```
 
-In such cases, the original map is returned as-is without cloning. This prevents data loss or corruption that would occur from attempting to handle un-interfaceable keys or values.
+Notes:
+- Exported fields: all filters work (tag, name, prefix, type, content). Unexported: only tag/name/prefix.
+- Map values are redacted only when the map is cloneable (see Cloning) and filters match.
+- Unexported interface fields are safe (no panic) but not inspectable by type/content.
 
-**Note**: This limitation also applies to maps that are fields within unexported struct fields. When a map is contained in an unexported field, it cannot be cloned and filtering will not be applied to its values.
-
-### ❌ Unexported interface fields
-
-Unexported fields with interface{} type can cause runtime errors when accessed through reflection. This is a fundamental limitation of Go's type system and reflection API. For example:
+### Cloning
+Example-first summary (what is copied vs kept as-is):
 
 ```go
-type MyStruct struct {
-    data interface{} // unexported interface field - may cause runtime errors
+type unexportedMapType map[string]string
+type exportedMapType map[string]string
+
+type CloneCase struct {
+    // Arrays / Slices
+    Items []privateData            // ✅ Cloned recursively (unexported element types OK)
+
+    // Maps
+    A map[string]*privateData      // ✅ Map cloned; elements are reallocated as new pointers
+    B map[string]privateData       // ❌ Returned as-is (unexported non-pointer value type)
+    C map[unexportedKey]string     // ❌ Returned as-is (unexported key type)
+    d map[string]string            // ❌ Returned as-is (map in unexported field)
+
+    // Embedded Types
+    unexportedMapType              // ❌ Returned as-is (embedded unexported map type)
+    ExportedMapType                // ✅ Map cloned (embedded exported map type)
+    hiddenCredentials              // ❌ Embedded unexported struct: fields not redacted
+    PublicCredentials              // ✅ Embedded exported struct: fields processed normally
+
+    // Pointers
+    Cred *cred                     // ✅ New allocation; pointed-to values processed recursively
 }
 ```
 
-**Workaround:** Use exported interface fields or concrete types instead of unexported interface fields.
+Notes:
+- Arrays/slices are cloned and processed recursively, even with unexported element types.
+- Maps are cloned when key and value types are exported, or when the value type is a pointer (`*T`). Pointer types are considered exported even if `T` is unexported.
+- Maps are returned as-is when the key or value type is an unexported non-pointer type, or when the map resides in an unexported struct field (cannot be safely interfaced).
+- **Embedded types**: Unexported embedded types (both struct and map) are returned as-is and their fields cannot be redacted. Exported embedded types are processed normally.
+- Pointers are cloned with new allocation; pointed-to values are processed recursively.
 
-### ❌ Content-based filters on unexported fields
-
-Content-based filters like `WithContain()` and `WithRegex()` do not work on unexported fields because the field values cannot be accessed through reflection. These filters only work on exported fields.
-
-**Note:** Field name and tag-based filters (`WithFieldName()`, `WithFieldPrefix()`, `WithTag()`) work correctly on unexported fields.
-
-### Working collection types
-
-The following collection types work correctly with unexported types:
-- Slices of unexported types (e.g., `[]privateData`) - ✅ Properly cloned
-- Arrays of unexported types (e.g., `[3]privateData`) - ✅ Properly cloned (including redaction)
-- Slices of pointers to unexported types (e.g., `[]*privateData`) - ✅ Properly cloned
-- Maps with unexported types (e.g., `map[string]privateData`) - ❌ Not cloned (limitation)
-
-**Workarounds:**
-- Use exported types for map values
-- Keep sensitive data in regular struct fields or slices (not in maps) where masq can properly handle unexported types
-- Use wrapper types that are exported
+### Recommendations
+- For unexported fields, prefer tag, field name, or prefix filters.
+- If a map must contain unexported types, use pointer values (e.g., `map[string]*T`) to enable cloning.
+- **Avoid unexported embedded types** (both struct and map) for sensitive data; use exported embedded types or regular struct fields instead.
+- Prefer storing sensitive data in structs or slices rather than maps when possible.
 
 ## License
 

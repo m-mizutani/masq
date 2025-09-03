@@ -654,3 +654,60 @@ func TestMigratedAllowedType(t *testing.T) {
 		t.Errorf("Failed to filter: %s", buf.String())
 	}
 }
+
+// Test for embedded unexported struct with fields for redaction
+func TestEmbeddedUnexportedStructRedaction(t *testing.T) {
+	// Test redaction behavior when unexported struct type is embedded
+	// and contains fields that should be redacted
+
+	type hiddenCredentials struct {
+		username string
+		password string
+		apiKey   string
+	}
+
+	type PublicCredentials struct {
+		Username string
+		Password string
+		ApiKey   string
+	}
+
+	type container struct {
+		ID     string
+		Public PublicCredentials
+		// Embedded unexported struct type
+		hiddenCredentials
+	}
+
+	original := &container{
+		ID: "test-id",
+		Public: PublicCredentials{
+			Username: "public-user",
+			Password: "public-password",
+			ApiKey:   "public-api-key",
+		},
+		hiddenCredentials: hiddenCredentials{
+			username: "hidden-user",
+			password: "hidden-password",
+			apiKey:   "hidden-api-key",
+		},
+	}
+
+	mask := masq.NewMasq(masq.WithContain("password"), masq.WithContain("api-key"))
+	cloned := gt.Cast[*container](t, mask.Redact(original))
+
+	// ID should not be redacted
+	gt.V(t, cloned.ID).Equal("test-id")
+
+	// Public fields should be redacted based on content
+	gt.V(t, cloned.Public.Username).Equal("public-user")         // NOT redacted
+	gt.V(t, cloned.Public.Password).Equal("[REDACTED]")          // redacted (contains "password")
+	gt.V(t, cloned.Public.ApiKey).Equal("[REDACTED]")            // redacted (contains "api-key")
+
+	// Embedded unexported struct: should be returned as-is (same reference)
+	// Fields within the embedded unexported struct should NOT be redacted
+	// because the type itself is unexported and cannot be processed
+	gt.V(t, cloned.hiddenCredentials.username).Equal("hidden-user")       // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")   // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.apiKey).Equal("hidden-api-key")      // NOT redacted
+}

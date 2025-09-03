@@ -743,6 +743,93 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		gt.V(t, cloned.secrets["normal"]).Equal("not-secret")
 	})
 
+	t.Run("embedded unexported map types", func(t *testing.T) {
+		// This test verifies behavior of embedded unexported map types
+		// which are different from unexported fields containing maps
+
+		type unexportedMapType map[string]string
+		type ExportedMapType map[string]string
+
+		type container struct {
+			Public string
+			// Embedded unexported map type
+			unexportedMapType
+			// Embedded exported map type (for comparison)
+			ExportedMapType
+			// Regular unexported field containing map (for comparison)
+			privateMap map[string]string
+		}
+
+		original := &container{
+			Public: "public-value",
+			unexportedMapType: unexportedMapType{
+				"embedded1": "value1",
+				"embedded2": "value2",
+			},
+			ExportedMapType: ExportedMapType{
+				"exported1": "exp-value1",
+				"exported2": "exp-value2",
+			},
+			privateMap: map[string]string{
+				"private1": "private-value1",
+				"private2": "private-value2",
+			},
+		}
+
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Basic field should be copied
+		gt.V(t, cloned.Public).Equal("public-value")
+
+		// Embedded unexported map type: should be returned as-is (same reference)
+		// This is because unexportedMapType itself is an unexported type
+		gt.V(t, fmt.Sprintf("%p", cloned.unexportedMapType)).Equal(fmt.Sprintf("%p", original.unexportedMapType))
+		gt.V(t, len(cloned.unexportedMapType)).Equal(2)
+		gt.V(t, cloned.unexportedMapType["embedded1"]).Equal("value1")
+
+		// Embedded exported map type: should be cloned (different reference) because it's accessible
+		gt.V(t, fmt.Sprintf("%p", cloned.ExportedMapType)).NotEqual(fmt.Sprintf("%p", original.ExportedMapType))
+		gt.V(t, len(cloned.ExportedMapType)).Equal(2)
+		gt.V(t, cloned.ExportedMapType["exported1"]).Equal("exp-value1")
+
+		// Regular unexported field: should be returned as-is (same reference)
+		gt.V(t, fmt.Sprintf("%p", cloned.privateMap)).Equal(fmt.Sprintf("%p", original.privateMap))
+		gt.V(t, len(cloned.privateMap)).Equal(2)
+		gt.V(t, cloned.privateMap["private1"]).Equal("private-value1")
+	})
+
+	t.Run("embedded unexported map types with redaction", func(t *testing.T) {
+		// Test redaction behavior with embedded unexported map types
+
+		type secretMapType map[string]string
+		type container struct {
+			Public string `masq:"secret"`
+			// Embedded unexported map type - should not be processed for redaction
+			secretMapType
+		}
+
+		original := &container{
+			Public: "public-secret",
+			secretMapType: secretMapType{
+				"key1": "secret-value1",
+				"key2": "secret-value2",
+			},
+		}
+
+		mask := masq.NewMasq(masq.WithContain("secret"))
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Public field should be redacted
+		gt.V(t, cloned.Public).Equal("[REDACTED]")
+
+		// Embedded unexported map: values should NOT be redacted
+		// because the embedded map type itself cannot be processed
+		gt.V(t, fmt.Sprintf("%p", cloned.secretMapType)).Equal(fmt.Sprintf("%p", original.secretMapType))
+		gt.V(t, cloned.secretMapType["key1"]).Equal("secret-value1") // NOT redacted
+		gt.V(t, cloned.secretMapType["key2"]).Equal("secret-value2") // NOT redacted
+	})
+
 	t.Run("prevent data loss from un-interfaceable keys", func(t *testing.T) {
 		// This test verifies that we don't lose data by mapping multiple
 		// un-interfaceable keys to the same zero value
