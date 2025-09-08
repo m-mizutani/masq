@@ -655,6 +655,101 @@ func TestMigratedAllowedType(t *testing.T) {
 	}
 }
 
+// TestFilterBehaviorWithFieldTypes verifies that filters work correctly with different field types
+func TestFilterBehaviorWithFieldTypes(t *testing.T) {
+	type CustomType string
+
+	t.Run("tag filter works on both exported and unexported fields", func(t *testing.T) {
+		type Example struct {
+			Public  string `masq:"secret"`
+			private string `masq:"secret"`
+		}
+
+		original := &Example{
+			Public:  "public-value",
+			private: "private-value",
+		}
+
+		mask := masq.NewMasq(masq.WithTag("secret"))
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		gt.V(t, cloned.Public).Equal("[REDACTED]")  // Tag works on exported
+		gt.V(t, cloned.private).Equal("[REDACTED]") // Tag works on unexported
+	})
+
+	t.Run("field name filter works on both exported and unexported fields", func(t *testing.T) {
+		type Example struct {
+			Password string
+			password string
+		}
+
+		original := &Example{
+			Password: "public-pass",
+			password: "private-pass",
+		}
+
+		mask := masq.NewMasq(masq.WithFieldName("Password"), masq.WithFieldName("password"))
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		gt.V(t, cloned.Password).Equal("[REDACTED]") // Name filter works on exported
+		gt.V(t, cloned.password).Equal("[REDACTED]") // Name filter works on unexported
+	})
+
+	t.Run("field prefix filter works on both exported and unexported fields", func(t *testing.T) {
+		type Example struct {
+			SecretData string
+			secretInfo string
+		}
+
+		original := &Example{
+			SecretData: "public-secret",
+			secretInfo: "private-secret",
+		}
+
+		mask := masq.NewMasq(masq.WithFieldPrefix("Secret"), masq.WithFieldPrefix("secret"))
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		gt.V(t, cloned.SecretData).Equal("[REDACTED]") // Prefix works on exported
+		gt.V(t, cloned.secretInfo).Equal("[REDACTED]") // Prefix works on unexported
+	})
+
+	t.Run("type filter only works on exported fields", func(t *testing.T) {
+		type Example struct {
+			Public  CustomType
+			private CustomType
+		}
+
+		original := &Example{
+			Public:  "public-typed",
+			private: "private-typed",
+		}
+
+		mask := masq.NewMasq(masq.WithType[CustomType]())
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		gt.V(t, string(cloned.Public)).Equal("[REDACTED]")     // Type filter works on exported
+		gt.V(t, string(cloned.private)).Equal("private-typed") // Type filter does NOT work on unexported
+	})
+
+	t.Run("content filter only works on exported fields", func(t *testing.T) {
+		type Example struct {
+			Public  string
+			private string
+		}
+
+		original := &Example{
+			Public:  "contains-password-here",
+			private: "contains-password-here",
+		}
+
+		mask := masq.NewMasq(masq.WithContain("password"))
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		gt.V(t, cloned.Public).Equal("[REDACTED]")             // Content filter works on exported
+		gt.V(t, cloned.private).Equal("contains-password-here") // Content filter does NOT work on unexported
+	})
+}
+
 // Test for embedded unexported struct with fields for redaction
 func TestEmbeddedUnexportedStructRedaction(t *testing.T) {
 	// Test redaction behavior when unexported struct type is embedded
@@ -700,14 +795,14 @@ func TestEmbeddedUnexportedStructRedaction(t *testing.T) {
 	gt.V(t, cloned.ID).Equal("test-id")
 
 	// Public fields should be redacted based on content
-	gt.V(t, cloned.Public.Username).Equal("public-user")         // NOT redacted
-	gt.V(t, cloned.Public.Password).Equal("[REDACTED]")          // redacted (contains "password")
-	gt.V(t, cloned.Public.ApiKey).Equal("[REDACTED]")            // redacted (contains "api-key")
+	gt.V(t, cloned.Public.Username).Equal("public-user") // NOT redacted
+	gt.V(t, cloned.Public.Password).Equal("[REDACTED]")  // redacted (contains "password")
+	gt.V(t, cloned.Public.ApiKey).Equal("[REDACTED]")    // redacted (contains "api-key")
 
 	// Embedded unexported struct: should be returned as-is (same reference)
 	// Fields within the embedded unexported struct should NOT be redacted
 	// because the type itself is unexported and cannot be processed
-	gt.V(t, cloned.hiddenCredentials.username).Equal("hidden-user")       // NOT redacted
-	gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")   // NOT redacted
-	gt.V(t, cloned.hiddenCredentials.apiKey).Equal("hidden-api-key")      // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.username).Equal("hidden-user")     // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password") // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.apiKey).Equal("hidden-api-key")    // NOT redacted
 }

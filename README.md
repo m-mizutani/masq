@@ -248,72 +248,68 @@ out.Flush()
 
 ## Limitations
 
-`masq` uses reflection to traverse and process values. The behavior is easiest to understand from two perspectives: Redaction (what gets masked) and Cloning (what gets copied vs kept as-is).
+`masq` works by first cloning values and then applying redaction filters. Understanding what can be cloned determines what can be redacted.
 
-### Redaction
-Example-first summary (what gets masked vs not):
-
-```go
-type RedactionCase struct {
-    // Fields
-    Password string `masq:"secret"` // ✅ Redacted (exported; tag/type/content apply)
-    password string `masq:"secret"` // ✅ Redacted (unexported; tag/name/prefix only)
-    apiKey   string                  // ✅ Redacted by name/prefix; ❌ not by content/type
-
-    // Maps
-    Users   map[string]*privateUser  // ✅ Elements redacted when filters match
-    Data    map[string]privateData   // ❌ Values not inspected (unexported non-pointer value type)
-    secrets map[string]string        // ❌ Not inspected (map in unexported field)
-
-    // Interface
-    anyValue interface{}             // ❌ Not inspected by type/content; name/tag/prefix on the field applies
-}
-```
-
-Notes:
-- Exported fields: all filters work (tag, name, prefix, type, content). Unexported: only tag/name/prefix.
-- Map values are redacted only when the map is cloneable (see Cloning) and filters match.
-- Unexported interface fields are safe (no panic) but not inspectable by type/content.
-
-### Cloning
-Example-first summary (what is copied vs kept as-is):
+### Processing behavior summary
 
 ```go
+// Type definitions
 type unexportedMapType map[string]string
-type exportedMapType map[string]string
+type hiddenCredentials struct { Password string }  // unexported struct type
+type PublicCredentials struct { Password string }  // exported struct type
 
-type CloneCase struct {
-    // Arrays / Slices
-    Items []privateData            // ✅ Cloned recursively (unexported element types OK)
+type Example struct {
+    // ✅ Fully processed (cloned & redacted)
+    Password     string                   // Exported field - all filters work
+    Users        map[string]*User          // Map with exported/pointer types
+    Items        []privateData             // Slices always work
+    PublicCredentials                      // Embedded exported struct
 
-    // Maps
-    A map[string]*privateData      // ✅ Map cloned; elements are reallocated as new pointers
-    B map[string]privateData       // ❌ Returned as-is (unexported non-pointer value type)
-    C map[unexportedKey]string     // ❌ Returned as-is (unexported key type)
-    d map[string]string            // ❌ Returned as-is (map in unexported field)
+    // ⚠️ Partially processed (cloned but limited redaction)
+    password     string                   // Unexported field - only tag/name/prefix filters work
+    hiddenCredentials                     // Embedded unexported struct - cloned but fields NOT redacted
+    Tagged       interface{} `masq:"x"`   // Interface field with matching filter → becomes nil
+    private      interface{}              // Unexported interface field → becomes nil
 
-    // Embedded Types
-    unexportedMapType              // ❌ Returned as-is (embedded unexported map type)
-    ExportedMapType                // ✅ Map cloned (embedded exported map type)
-    hiddenCredentials              // ❌ Embedded unexported struct: fields not redacted
-    PublicCredentials              // ✅ Embedded exported struct: fields processed normally
-
-    // Pointers
-    Cred *cred                     // ✅ New allocation; pointed-to values processed recursively
+    // 🔒 Not processed (returns nil/zero value - cannot be redacted)
+    Data         map[string]privateData   // Map with unexported value type → nil
+    secrets      map[string]string        // Map in unexported field → nil
+    unexportedMapType                     // Embedded unexported map → nil
 }
 ```
 
-Notes:
-- Arrays/slices are cloned and processed recursively, even with unexported element types.
-- Maps are cloned when key and value types are exported, or when the value type is a pointer (`*T`). Pointer types are considered exported even if `T` is unexported.
-- Maps are returned as-is when the key or value type is an unexported non-pointer type, or when the map resides in an unexported struct field (cannot be safely interfaced).
-- **Embedded types**: Unexported embedded types (both struct and map) are returned as-is and their fields cannot be redacted. Exported embedded types are processed normally.
-- Pointers are cloned with new allocation; pointed-to values are processed recursively.
+### Detailed behavior
+
+#### Fully processed types
+These are cloned properly and all redaction filters work:
+- **Exported fields**: Support all filters (tag, name, prefix, type, content)
+- **Maps with exported types**: `map[string]string`, `map[K]*V` (pointer values always work)
+- **Slices and arrays**: Always cloned recursively, even with unexported element types
+- **Embedded exported types**: Processed like regular fields
+
+#### Partially processed types
+These are cloned but have limitations:
+- **Unexported fields**: Only tag, name, and prefix filters work (not type or content)
+- **Embedded unexported structs**: The struct is cloned, but fields inside cannot be redacted
+- **Interface fields with matching filters**: Become nil instead of being redacted (limitation)
+- **Unexported interface fields**: Become nil (limitation)
+
+#### Not processed types (security measure)
+These return `nil` or zero values to prevent information leakage:
+- **Maps with unexported key/value types**: `map[unexportedType]V` or `map[K]unexportedType`
+- **Maps in unexported fields**: Even if the map type is exported
+- **Embedded unexported map types**: Return `nil` instead of original reference
+
+### Notes
+- The security measure of returning `nil` for certain map types prevents potential bypass of access controls through reflection
+- Interface fields have limitations: they become `nil` when filters match or when the field is unexported
+- Pointers are always cloned with new allocation, and pointed-to values are processed recursively
 
 ### Recommendations
 - For unexported fields, prefer tag, field name, or prefix filters.
 - If a map must contain unexported types, use pointer values (e.g., `map[string]*T`) to enable cloning.
-- **Avoid unexported embedded types** (both struct and map) for sensitive data; use exported embedded types or regular struct fields instead.
+- **Avoid embedding unexported structs** if their fields contain sensitive data that needs redaction - use regular struct fields instead.
+- **Never embed unexported map types** as they will return `nil` for security.
 - Prefer storing sensitive data in structs or slices rather than maps when possible.
 
 ## License
