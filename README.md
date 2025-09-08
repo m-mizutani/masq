@@ -276,7 +276,7 @@ Notes:
 - Unexported interface fields are safe (no panic) but not inspectable by type/content.
 
 ### Cloning
-Example-first summary (what is copied vs kept as-is):
+Example-first summary (what is copied vs returned as zero value):
 
 ```go
 type unexportedMapType map[string]string
@@ -288,12 +288,12 @@ type CloneCase struct {
 
     // Maps
     A map[string]*privateData      // ✅ Map cloned; elements are reallocated as new pointers
-    B map[string]privateData       // ❌ Returned as-is (unexported non-pointer value type)
-    C map[unexportedKey]string     // ❌ Returned as-is (unexported key type)
-    d map[string]string            // ❌ Returned as-is (map in unexported field)
+    B map[string]privateData       // 🔒 Returns nil (unexported non-pointer value type - security measure)
+    C map[unexportedKey]string     // 🔒 Returns nil (unexported key type - security measure)
+    d map[string]string            // 🔒 Returns nil (map in unexported field - security measure)
 
     // Embedded Types
-    unexportedMapType              // ❌ Returned as-is (embedded unexported map type)
+    unexportedMapType              // 🔒 Returns nil (embedded unexported map type - security measure)
     ExportedMapType                // ✅ Map cloned (embedded exported map type)
     hiddenCredentials              // ❌ Embedded unexported struct: fields not redacted
     PublicCredentials              // ✅ Embedded exported struct: fields processed normally
@@ -306,8 +306,8 @@ type CloneCase struct {
 Notes:
 - Arrays/slices are cloned and processed recursively, even with unexported element types.
 - Maps are cloned when key and value types are exported, or when the value type is a pointer (`*T`). Pointer types are considered exported even if `T` is unexported.
-- Maps are returned as-is when the key or value type is an unexported non-pointer type, or when the map resides in an unexported struct field (cannot be safely interfaced).
-- **Embedded types**: Unexported embedded types (both struct and map) are returned as-is and their fields cannot be redacted. Exported embedded types are processed normally.
+- **Security measure**: Maps with unexported key or value types, or maps in unexported fields, return `nil` instead of the original reference to prevent potential information leakage through reflection bypass.
+- **Embedded types**: Unexported embedded types (both struct and map) return zero values for security. Exported embedded types are processed normally.
 - Pointers are cloned with new allocation; pointed-to values are processed recursively.
 
 ### Recommendations
