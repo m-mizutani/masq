@@ -91,7 +91,8 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		ctx = context.WithValue(ctx, ctxKeyDepth{}, 0)
 	} else {
 		if v >= maxDepth {
-			return src
+			// Security: Return zero value instead of original to prevent redaction bypass
+			return reflect.Zero(src.Type())
 		}
 		ctx = context.WithValue(ctx, ctxKeyDepth{}, v+1)
 
@@ -310,16 +311,15 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		valueType := mapType.Elem()
 		isUnexportedValueType := isUnexported(valueType)
 
-		// If map has unexported key or value type, return the original map
-		// This is a limitation due to Go's reflection API
+		// Security: If map has unexported key or value type, return zero value
+		// This prevents potential information leakage at the cost of losing the map content
 		if isUnexportedKeyType || isUnexportedValueType {
-			return src
+			return reflect.Zero(src.Type())
 		}
 
-		// Check if we're in an unexported context by checking if we can create values
-		// This happens when the map is inside an unexported struct field
+		// Security: If map cannot be interfaced, return zero value for safety
 		if !src.CanInterface() {
-			return src
+			return reflect.Zero(src.Type())
 		}
 
 		dst := reflect.MakeMapWithSize(mapType, src.Len())
@@ -353,12 +353,12 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		return dst
 
 	case reflect.Array:
-		if src.Len() == 0 {
-			return src // can not access to src.Index(0)
-		}
-
-		// For arrays, we need to create an addressable copy to work with
+		// Security: Always create new instance even for empty arrays
 		dst := reflect.New(src.Type()).Elem()
+
+		if src.Len() == 0 {
+			return dst // Return new empty array instance
+		}
 
 		// If the source can be set directly, use normal approach
 		if dst.CanSet() && src.CanInterface() {
@@ -416,7 +416,8 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 
 	case reflect.Interface:
 		if src.IsNil() {
-			return src
+			// Security: Return zero value for consistency
+			return reflect.Zero(src.Type())
 		}
 		return x.clone(ctx, fieldName, src.Elem(), tag)
 
@@ -430,7 +431,13 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 // isUnexported checks if a type is truly unexported.
 // Unlike checking PkgPath() != "", this function correctly identifies
 // built-in types and exported user-defined types.
+// For pointer types, it checks the underlying type for security purposes.
 func isUnexported(t reflect.Type) bool {
+	// For pointer types, check the underlying type
+	if t.Kind() == reflect.Pointer {
+		return isUnexported(t.Elem())
+	}
+
 	// Built-in types (like string, int, etc.) have empty PkgPath and are always exported
 	if t.PkgPath() == "" {
 		return false

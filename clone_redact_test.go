@@ -700,14 +700,14 @@ func TestEmbeddedUnexportedStructRedaction(t *testing.T) {
 	gt.V(t, cloned.ID).Equal("test-id")
 
 	// Public fields should be redacted based on content
-	gt.V(t, cloned.Public.Username).Equal("public-user")         // NOT redacted
-	gt.V(t, cloned.Public.Password).Equal("[REDACTED]")          // redacted (contains "password")
-	gt.V(t, cloned.Public.ApiKey).Equal("[REDACTED]")            // redacted (contains "api-key")
+	gt.V(t, cloned.Public.Username).Equal("public-user") // NOT redacted
+	gt.V(t, cloned.Public.Password).Equal("[REDACTED]")  // redacted (contains "password")
+	gt.V(t, cloned.Public.ApiKey).Equal("[REDACTED]")    // redacted (contains "api-key")
 
 	// Embedded unexported struct: should be returned as-is (same reference)
 	// Fields within the embedded unexported struct should NOT be redacted
 	// because the type itself is unexported and cannot be processed
-	gt.V(t, cloned.hiddenCredentials.username).Equal("hidden-user")       // NOT redacted
-	gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")   // NOT redacted
-	gt.V(t, cloned.hiddenCredentials.apiKey).Equal("hidden-api-key")      // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.username).Equal("hidden-user")     // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password") // NOT redacted
+	gt.V(t, cloned.hiddenCredentials.apiKey).Equal("hidden-api-key")    // NOT redacted
 }
