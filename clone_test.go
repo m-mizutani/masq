@@ -258,7 +258,7 @@ func TestMapData(t *testing.T) {
 	copied := gt.Cast[map[string]*testData](t, c.Redact(data))
 
 	// Check if map was successfully cloned and contains expected data
-	if copied == nil || len(copied) == 0 || copied["xyz"] == nil {
+	if len(copied) == 0 || copied["xyz"] == nil {
 		t.Skip("Map clone returned empty/nil due to security restrictions - this is expected behavior")
 		return
 	}
@@ -491,7 +491,7 @@ func TestCloneComplexUnexportedTypes(t *testing.T) {
 	gt.V(t, copied.Array[0].num).Equal(111)
 
 	// Maps with unexported types return zero values for security
-	if copied.Map == nil || len(copied.Map) == 0 {
+	if len(copied.Map) == 0 {
 		t.Log("Map with unexported types returned nil/empty for security - this is expected")
 	} else {
 		gt.V(t, len(copied.Map)).Equal(2)
@@ -500,7 +500,7 @@ func TestCloneComplexUnexportedTypes(t *testing.T) {
 	}
 
 	// Maps with unexported pointer types also return zero values for security
-	if copied.MapPtr == nil || len(copied.MapPtr) == 0 {
+	if len(copied.MapPtr) == 0 {
 		t.Log("Map with unexported pointer types returned nil/empty for security - this is expected")
 	} else {
 		gt.V(t, len(copied.MapPtr)).Equal(2)
