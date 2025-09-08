@@ -563,7 +563,7 @@ func TestMapWithStructValues(t *testing.T) {
 	cloned2 := mask.Redact(original2).(*container2)
 
 	// Due to security fix: maps with unexported types return zero values
-	if cloned2.itemMap == nil || len(cloned2.itemMap) == 0 {
+	if len(cloned2.itemMap) == 0 {
 		t.Log("Map with unexported types returned nil/empty for security - this is expected")
 	} else {
 		// This would only run if the map was successfully cloned (not expected with current security fix)
@@ -746,13 +746,8 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		// Should not panic
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Map should be the same reference (not cloned)
-		gt.V(t, fmt.Sprintf("%p", cloned.secrets)).Equal(fmt.Sprintf("%p", original.secrets))
-
-		// Values are NOT redacted because the map is in an unexported field
-		gt.V(t, cloned.secrets["password"]).Equal("secret123")
-		gt.V(t, cloned.secrets["apiKey"]).Equal("sk-12345")
-		gt.V(t, cloned.secrets["normal"]).Equal("not-secret")
+		// Security: Map with unexported field returns zero value
+		gt.V(t, cloned.secrets).Equal(map[string]string(nil))
 	})
 
 	t.Run("embedded unexported map types", func(t *testing.T) {
@@ -794,21 +789,16 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		// Basic field should be copied
 		gt.V(t, cloned.Public).Equal("public-value")
 
-		// Embedded unexported map type: should be returned as-is (same reference)
-		// This is because unexportedMapType itself is an unexported type
-		gt.V(t, fmt.Sprintf("%p", cloned.unexportedMapType)).Equal(fmt.Sprintf("%p", original.unexportedMapType))
-		gt.V(t, len(cloned.unexportedMapType)).Equal(2)
-		gt.V(t, cloned.unexportedMapType["embedded1"]).Equal("value1")
+		// Security: Embedded unexported map type returns zero value
+		gt.V(t, cloned.unexportedMapType).Equal(unexportedMapType(nil))
 
 		// Embedded exported map type: should be cloned (different reference) because it's accessible
 		gt.V(t, fmt.Sprintf("%p", cloned.ExportedMapType)).NotEqual(fmt.Sprintf("%p", original.ExportedMapType))
 		gt.V(t, len(cloned.ExportedMapType)).Equal(2)
 		gt.V(t, cloned.ExportedMapType["exported1"]).Equal("exp-value1")
 
-		// Regular unexported field: should be returned as-is (same reference)
-		gt.V(t, fmt.Sprintf("%p", cloned.privateMap)).Equal(fmt.Sprintf("%p", original.privateMap))
-		gt.V(t, len(cloned.privateMap)).Equal(2)
-		gt.V(t, cloned.privateMap["private1"]).Equal("private-value1")
+		// Security: Regular unexported field returns zero value
+		gt.V(t, cloned.privateMap).Equal(map[string]string(nil))
 	})
 
 	t.Run("embedded unexported map types with redaction", func(t *testing.T) {
@@ -835,11 +825,8 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		// Public field should be redacted
 		gt.V(t, cloned.Public).Equal("[REDACTED]")
 
-		// Embedded unexported map: values should NOT be redacted
-		// because the embedded map type itself cannot be processed
-		gt.V(t, fmt.Sprintf("%p", cloned.secretMapType)).Equal(fmt.Sprintf("%p", original.secretMapType))
-		gt.V(t, cloned.secretMapType["key1"]).Equal("secret-value1") // NOT redacted
-		gt.V(t, cloned.secretMapType["key2"]).Equal("secret-value2") // NOT redacted
+		// Security: Embedded unexported map type returns zero value
+		gt.V(t, cloned.secretMapType).Equal(secretMapType(nil))
 	})
 
 	t.Run("prevent data loss from un-interfaceable keys", func(t *testing.T) {
@@ -868,14 +855,8 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Map should be the same reference (not cloned) due to unexported key type
-		gt.V(t, fmt.Sprintf("%p", cloned.Data)).Equal(fmt.Sprintf("%p", original.Data))
-
-		// All entries should still exist (no data loss)
-		gt.V(t, len(cloned.Data)).Equal(3)
-		gt.V(t, cloned.Data[complexKey{id: 1, name: "first"}]).Equal("value1")
-		gt.V(t, cloned.Data[complexKey{id: 2, name: "second"}]).Equal("value2")
-		gt.V(t, cloned.Data[complexKey{id: 3, name: "third"}]).Equal("value3")
+		// Security: Map with unexported key type returns zero value
+		gt.V(t, cloned.Data).Equal(map[complexKey]string(nil))
 	})
 }
 
@@ -922,7 +903,7 @@ func TestMapFieldCloning(t *testing.T) {
 
 		clonedMap := getMap(cloned)
 		// Due to security fix: unexported map fields return zero values
-		if clonedMap == nil || len(clonedMap) == 0 {
+		if len(clonedMap) == 0 {
 			t.Log("Unexported map field returned nil/empty for security - this is expected")
 		} else {
 			gt.V(t, len(clonedMap)).Equal(2)
@@ -1042,23 +1023,17 @@ func TestCloneExternalUnexportedStructs(t *testing.T) {
 	})
 
 	t.Run("ComplexData itemMap limitation demonstration", func(t *testing.T) {
-		// This test explicitly demonstrates the limitation with itemMap
+		// This test explicitly demonstrates the security behavior with itemMap
 		original := NewComplexData()
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*ComplexData](t, mask.Redact(original))
 
-		// The itemMap field should be the same reference (not cloned)
-		// We can verify this indirectly by checking that modifications to the original
-		// would affect the cloned version (though we can't modify unexported types directly)
+		// Security: The itemMap field with unexported value type returns zero value (nil)
+		gt.V(t, cloned.itemMap).Equal(map[string]item(nil))
 
-		// We can at least verify the map still has data
-		item := cloned.itemMap["key1"]
-		gt.V(t, item.id).Equal("map1")
-		gt.V(t, item.value).Equal(500)
-
-		// Note: Unlike slices and arrays of unexported types which ARE properly cloned,
-		// maps with unexported value types are NOT cloned due to Go's reflection limitations
-		t.Log("itemMap was not cloned - this is expected behavior due to Go reflection limitations")
+		// Note: Maps with unexported value types return nil for security purposes
+		// to prevent potential information leakage
+		t.Log("itemMap returns nil - this is expected security behavior")
 	})
 }
 
