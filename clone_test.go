@@ -21,181 +21,131 @@ func allFieldCensor(fieldName string, value interface{}, tag string) bool {
 	return fieldName != ""
 }
 
-func TestClone(t *testing.T) {
-	c := masq.NewMasq(masq.WithContain("blue"))
-
-	t.Run("string", func(t *testing.T) {
+// TestCloneRedact tests cases where values are successfully redacted during cloning
+func TestCloneRedact(t *testing.T) {
+	t.Run("string with contain filter", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
 		v := gt.Cast[string](t, c.Redact("blue is blue"))
 		gt.V(t, v).Equal(masq.DefaultRedactMessage)
 	})
 
-	t.Run("nil", func(t *testing.T) {
-		gt.V(t, c.Redact(nil)).Nil()
-	})
-
-	t.Run("struct", func(t *testing.T) {
+	t.Run("struct fields with contain filter", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
 		type testData struct {
 			ID    int
 			Name  string
 			Label string
 		}
 
-		t.Run("original data is not modified when filtered", func(t *testing.T) {
-			data := &testData{
-				ID:    100,
-				Name:  "blue",
-				Label: "five",
-			}
-			copied := gt.Cast[*testData](t, c.Redact(data))
+		data := &testData{
+			ID:    100,
+			Name:  "blue",
+			Label: "five",
+		}
+		copied := gt.Cast[*testData](t, c.Redact(data))
 
-			gt.V(t, copied).NotNil()
-			gt.Value(t, masq.DefaultRedactMessage).Equal(copied.Name)
-			gt.Value(t, data.Name).Equal("blue")
-			gt.Value(t, data.Label).Equal("five")
-			gt.Value(t, copied.Label).Equal("five")
-			gt.Value(t, copied.ID).Equal(100)
-		})
-
-		t.Run("non-ptr struct can be modified", func(t *testing.T) {
-			data := testData{
-				Name:  "blue",
-				Label: "five",
-			}
-			copied := gt.Cast[testData](t, c.Redact(data))
-			gt.V(t, copied.Name).Equal(masq.DefaultRedactMessage)
-			gt.V(t, copied.Label).Equal("five")
-		})
-
-		t.Run("nested structure can be modified", func(t *testing.T) {
-			type testDataParent struct {
-				Child testData
-			}
-
-			data := &testDataParent{
-				Child: testData{
-					Name:  "blue",
-					Label: "five",
-				},
-			}
-			copied := gt.Cast[*testDataParent](t, c.Redact(data))
-			gt.V(t, copied.Child.Name).Equal(masq.DefaultRedactMessage)
-			gt.V(t, copied.Child.Label).Equal("five")
-		})
-
-		t.Run("map data", func(t *testing.T) {
-			data := map[string]*testData{
-				"xyz": {
-					Name:  "blue",
-					Label: "five",
-				},
-			}
-			copied := gt.Cast[map[string]*testData](t, c.Redact(data))
-
-			// For security, if map contains unexported types, it becomes nil
-			if copied == nil {
-				// This is expected behavior for security reasons
-				t.Log("Map with unexported types returned nil for security")
-				return
-			}
-
-			gt.V(t, copied["xyz"].Name).Equal(masq.DefaultRedactMessage)
-			gt.V(t, copied["xyz"].Label).Equal("five")
-		})
-
-		t.Run("array data", func(t *testing.T) {
-			data := []testData{
-				{
-					Name:  "orange",
-					Label: "five",
-				},
-				{
-					Name:  "blue",
-					Label: "five",
-				},
-			}
-			copied := gt.Cast[[]testData](t, c.Redact(data))
-			gt.V(t, copied[0].Name).Equal("orange")
-			gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
-			gt.V(t, copied[1].Label).Equal("five")
-		})
-
-		t.Run("array data with ptr", func(t *testing.T) {
-			data := []*testData{
-				{
-					Name:  "orange",
-					Label: "five",
-				},
-				{
-					Name:  "blue",
-					Label: "five",
-				},
-			}
-			copied := gt.Cast[[]*testData](t, c.Redact(data))
-			gt.V(t, copied[0].Name).Equal("orange")
-			gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
-			gt.V(t, copied[1].Label).Equal("five")
-		})
-
-		t.Run("original type", func(t *testing.T) {
-			type myType string
-			type myData struct {
-				Name myType
-			}
-			data := &myData{
-				Name: "miss blue",
-			}
-			copied := gt.Cast[*myData](t, c.Redact(data))
-			gt.V(t, copied.Name).Equal(myType(masq.DefaultRedactMessage))
-		})
-
-		t.Run("unexported field should be copied", func(t *testing.T) {
-			type myStruct struct {
-				unexported string
-				Exported   string
-			}
-
-			data := &myStruct{
-				unexported: "red",
-				Exported:   "orange",
-			}
-			copied := gt.Cast[*myStruct](t, c.Redact(data))
-			gt.V(t, copied.unexported).Equal("red")
-			gt.V(t, copied.Exported).Equal("orange")
-		})
-
-		t.Run("various field", func(t *testing.T) {
-			type child struct{}
-			type myStruct struct {
-				Func      func() time.Time
-				Chan      chan int
-				Bool      bool
-				Bytes     []byte
-				Array     [2]string
-				Interface interface{}
-				Child     *child
-			}
-			data := &myStruct{
-				Func:      time.Now,
-				Chan:      make(chan int),
-				Bool:      true,
-				Bytes:     []byte("timeless"),
-				Array:     [2]string{"aa", "bb"},
-				Interface: &struct{}{},
-				Child:     nil,
-			}
-			copied := gt.Cast[*myStruct](t, c.Redact(data))
-
-			// function type is not comparable, but it's ok if not nil
-			gt.V(t, copied.Func).NotNil()
-			gt.V(t, copied.Chan).Equal(data.Chan)
-			gt.V(t, copied.Bool).Equal(data.Bool)
-			gt.V(t, copied.Bytes).Equal(data.Bytes)
-			gt.V(t, copied.Array).Equal(data.Array)
-			gt.V(t, copied.Interface).Equal(data.Interface)
-		})
+		gt.V(t, copied).NotNil()
+		gt.Value(t, masq.DefaultRedactMessage).Equal(copied.Name)
+		gt.Value(t, data.Name).Equal("blue")
+		gt.Value(t, data.Label).Equal("five")
+		gt.Value(t, copied.Label).Equal("five")
+		gt.Value(t, copied.ID).Equal(100)
 	})
 
-	t.Run("filter various type", func(t *testing.T) {
+	t.Run("non-ptr struct", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type testData struct {
+			Name  string
+			Label string
+		}
+		data := testData{
+			Name:  "blue",
+			Label: "five",
+		}
+		copied := gt.Cast[testData](t, c.Redact(data))
+		gt.V(t, copied.Name).Equal(masq.DefaultRedactMessage)
+		gt.V(t, copied.Label).Equal("five")
+	})
+
+	t.Run("nested structure", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type testData struct {
+			Name  string
+			Label string
+		}
+		type testDataParent struct {
+			Child testData
+		}
+
+		data := &testDataParent{
+			Child: testData{
+				Name:  "blue",
+				Label: "five",
+			},
+		}
+		copied := gt.Cast[*testDataParent](t, c.Redact(data))
+		gt.V(t, copied.Child.Name).Equal(masq.DefaultRedactMessage)
+		gt.V(t, copied.Child.Label).Equal("five")
+	})
+
+	t.Run("array data", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type testData struct {
+			Name  string
+			Label string
+		}
+		data := []testData{
+			{
+				Name:  "orange",
+				Label: "five",
+			},
+			{
+				Name:  "blue",
+				Label: "five",
+			},
+		}
+		copied := gt.Cast[[]testData](t, c.Redact(data))
+		gt.V(t, copied[0].Name).Equal("orange")
+		gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
+		gt.V(t, copied[1].Label).Equal("five")
+	})
+
+	t.Run("array data with ptr", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type testData struct {
+			Name  string
+			Label string
+		}
+		data := []*testData{
+			{
+				Name:  "orange",
+				Label: "five",
+			},
+			{
+				Name:  "blue",
+				Label: "five",
+			},
+		}
+		copied := gt.Cast[[]*testData](t, c.Redact(data))
+		gt.V(t, copied[0].Name).Equal("orange")
+		gt.V(t, copied[1].Name).Equal(masq.DefaultRedactMessage)
+		gt.V(t, copied[1].Label).Equal("five")
+	})
+
+	t.Run("custom type string", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type myType string
+		type myData struct {
+			Name myType
+		}
+		data := &myData{
+			Name: "miss blue",
+		}
+		copied := gt.Cast[*myData](t, c.Redact(data))
+		gt.V(t, copied.Name).Equal(myType(masq.DefaultRedactMessage))
+	})
+
+	t.Run("filter various types with allFieldCensor", func(t *testing.T) {
 		mask := masq.NewMasq(
 			masq.WithCensor(allFieldCensor),
 		)
@@ -237,6 +187,278 @@ func TestClone(t *testing.T) {
 		gt.Value(t, copied.Interface).Nil()
 		gt.Value(t, copied.Child.Data).Equal("")
 		gt.Value(t, copied.ChildPtr).Nil()
+	})
+
+	t.Run("circular reference redaction", func(t *testing.T) {
+		type myStruct struct {
+			Child *myStruct
+			Str   string
+		}
+		data := &myStruct{
+			Str: "blue",
+		}
+		data.Child = data
+
+		c := masq.NewMasq(masq.WithContain("blue"))
+		newData := c.Redact(data).(*myStruct)
+		gt.V(t, newData.Child.Child.Str).Equal("[REDACTED]")
+	})
+
+	t.Run("unexported array with struct elements redaction", func(t *testing.T) {
+		type user struct {
+			name     string
+			password string
+		}
+		type testStruct struct {
+			Public string
+			users  [3]user
+		}
+
+		original := &testStruct{
+			Public: "public",
+			users: [3]user{
+				{name: "alice", password: "secret1"},
+				{name: "bob", password: "secret2"},
+				{name: "charlie", password: "secret3"},
+			},
+		}
+
+		mask := masq.NewMasq(masq.WithFieldName("password"))
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+
+		gt.V(t, copied.Public).Equal("public")
+		// All passwords should be redacted
+		gt.V(t, copied.users[0].name).Equal("alice")
+		gt.V(t, copied.users[0].password).Equal("[REDACTED]")
+		gt.V(t, copied.users[1].name).Equal("bob")
+		gt.V(t, copied.users[1].password).Equal("[REDACTED]")
+		gt.V(t, copied.users[2].name).Equal("charlie")
+		gt.V(t, copied.users[2].password).Equal("[REDACTED]")
+	})
+
+	t.Run("unexported array with mixed types redaction", func(t *testing.T) {
+		type sensitive struct {
+			apiKey string
+		}
+		type testStruct struct {
+			Public      string
+			stringArray [2]string
+			structArray [2]sensitive
+		}
+
+		original := &testStruct{
+			Public:      "public",
+			stringArray: [2]string{"normal", "Bearer token123"},
+			structArray: [2]sensitive{
+				{apiKey: "sk-12345"},
+				{apiKey: "sk-67890"},
+			},
+		}
+
+		mask := masq.NewMasq(
+			masq.WithContain("Bearer"),
+			masq.WithFieldName("apiKey"),
+		)
+		copied := gt.Cast[*testStruct](t, mask.Redact(original))
+
+		gt.V(t, copied.Public).Equal("public")
+		// String array element with "Bearer" should be redacted
+		gt.V(t, copied.stringArray[0]).Equal("normal")
+		gt.V(t, copied.stringArray[1]).Equal("[REDACTED]")
+		// Struct array elements with apiKey field should be redacted
+		gt.V(t, copied.structArray[0].apiKey).Equal("[REDACTED]")
+		gt.V(t, copied.structArray[1].apiKey).Equal("[REDACTED]")
+	})
+
+	t.Run("embedded unexported struct field redaction", func(t *testing.T) {
+		type hiddenCredentials struct {
+			username string
+			password string // Should be redacted but can't because it's in unexported struct
+		}
+
+		type container struct {
+			ID       string
+			Password string // This should be redacted
+			hiddenCredentials
+		}
+
+		original := &container{
+			ID:       "test-id",
+			Password: "public-password",
+			hiddenCredentials: hiddenCredentials{
+				username: "hidden-user",
+				password: "hidden-password",
+			},
+		}
+
+		// Use WithContain to redact anything containing "password"
+		mask := masq.NewMasq(masq.WithContain("password"))
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Regular exported field should be redacted
+		gt.V(t, cloned.Password).Equal("[REDACTED]")
+
+		// But embedded unexported struct fields are NOT redacted
+		// even though they contain "password"
+		gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")
+	})
+
+	t.Run("exported fields in embedded unexported struct", func(t *testing.T) {
+		// Unexported struct type but with EXPORTED fields
+		type hiddenCredentials struct {
+			Username string // Exported field
+			Password string // Exported field
+		}
+
+		type container struct {
+			ID                string
+			hiddenCredentials // Embedded unexported struct
+		}
+
+		original := &container{
+			ID: "test-id",
+			hiddenCredentials: hiddenCredentials{
+				Username: "hidden-user",
+				Password: "hidden-password",
+			},
+		}
+
+		// Test if content filter works on exported fields inside unexported struct
+		mask := masq.NewMasq(masq.WithContain("password"))
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Exported fields in embedded unexported struct CAN be redacted!
+		gt.V(t, cloned.hiddenCredentials.Password).Equal("[REDACTED]")
+		gt.V(t, cloned.hiddenCredentials.Username).Equal("hidden-user") // Doesn't contain "password"
+	})
+}
+
+// TestCloneNotRedact tests cases where values are not redacted (but successfully cloned)
+func TestCloneNotRedact(t *testing.T) {
+	t.Run("nil value", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		gt.V(t, c.Redact(nil)).Nil()
+	})
+
+	t.Run("unexported field not redacted", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type myStruct struct {
+			unexported string
+			Exported   string
+		}
+
+		data := &myStruct{
+			unexported: "red",
+			Exported:   "orange",
+		}
+		copied := gt.Cast[*myStruct](t, c.Redact(data))
+		gt.V(t, copied.unexported).Equal("red")
+		gt.V(t, copied.Exported).Equal("orange")
+	})
+
+	t.Run("various fields not matching filter", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("blue"))
+		type child struct{}
+		type myStruct struct {
+			Func      func() time.Time
+			Chan      chan int
+			Bool      bool
+			Bytes     []byte
+			Array     [2]string
+			Interface interface{}
+			Child     *child
+		}
+		data := &myStruct{
+			Func:      time.Now,
+			Chan:      make(chan int),
+			Bool:      true,
+			Bytes:     []byte("timeless"),
+			Array:     [2]string{"aa", "bb"},
+			Interface: &struct{}{},
+			Child:     nil,
+		}
+		copied := gt.Cast[*myStruct](t, c.Redact(data))
+
+		// function type is not comparable, but it's ok if not nil
+		gt.V(t, copied.Func).NotNil()
+		gt.V(t, copied.Chan).Equal(data.Chan)
+		gt.V(t, copied.Bool).Equal(data.Bool)
+		gt.V(t, copied.Bytes).Equal(data.Bytes)
+		gt.V(t, copied.Array).Equal(data.Array)
+		gt.V(t, copied.Interface).Equal(data.Interface)
+	})
+
+	t.Run("unexported structs preserve values", func(t *testing.T) {
+		// Test for handling unexported fields in unexported structs
+		type unexportedInner struct {
+			privateField string
+			PublicField  string
+		}
+
+		type publicOuter struct {
+			Inner      unexportedInner
+			InnerPtr   *unexportedInner
+			unexported string
+			Exported   string
+		}
+
+		data := &publicOuter{
+			Inner: unexportedInner{
+				privateField: "secret1",
+				PublicField:  "public1",
+			},
+			InnerPtr: &unexportedInner{
+				privateField: "secret2",
+				PublicField:  "public2",
+			},
+			unexported: "hidden",
+			Exported:   "visible",
+		}
+
+		mask := masq.NewMasq()
+		copied := gt.Cast[*publicOuter](t, mask.Redact(data))
+
+		// Verify all fields are copied correctly
+		gt.V(t, copied.Inner.privateField).Equal("secret1")
+		gt.V(t, copied.Inner.PublicField).Equal("public1")
+		gt.V(t, copied.InnerPtr.privateField).Equal("secret2")
+		gt.V(t, copied.InnerPtr.PublicField).Equal("public2")
+		gt.V(t, copied.unexported).Equal("hidden")
+		gt.V(t, copied.Exported).Equal("visible")
+	})
+
+	t.Run("cloned functions work", func(t *testing.T) {
+		type myFunc func() string
+		src := myFunc(func() string { return "blue" })
+		dst := masq.NewMasq().Redact(src).(myFunc)
+		gt.Equal(t, dst(), "blue")
+	})
+
+	t.Run("time preserved", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		logger := slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{
+			ReplaceAttr: masq.New(masq.WithAllowedType(reflect.TypeOf(time.Time{}))),
+		}))
+
+		// Get timestamp just before logging to minimize time difference
+		beforeLog := time.Now()
+		logger.Info("hello")
+		afterLog := time.Now()
+
+		var out map[string]any
+		gt.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+
+		tv, ok := out["time"].(string)
+		gt.B(t, ok).True()
+
+		// Parse the logged time
+		loggedTime, err := time.Parse(time.RFC3339Nano, tv)
+		gt.NoError(t, err)
+
+		// Verify the logged time is within the expected range
+		if loggedTime.Before(beforeLog) || loggedTime.After(afterLog) {
+			t.Errorf("Logged time %v is not within expected range [%v, %v]", loggedTime, beforeLog, afterLog)
+		}
 	})
 }
 
@@ -359,19 +581,252 @@ func TestNilInterface(t *testing.T) {
 	gt.S(t, buf.String()).Contains("null")
 }
 
-func TestCircularReference(t *testing.T) {
-	type myStruct struct {
-		Child *myStruct
-		Str   string
-	}
-	data := &myStruct{
-		Str: "blue",
-	}
-	data.Child = data
+// TestCloneNotCloned tests cases where values cannot be cloned due to security or limitations
+func TestCloneNotCloned(t *testing.T) {
+	t.Run("maps with unexported types return nil", func(t *testing.T) {
+		// This test demonstrates the security improvement: unexported maps return zero values
+		original := NewMapContainer()
 
-	c := masq.NewMasq(masq.WithContain("blue"))
-	newData := c.Redact(data).(*myStruct)
-	gt.V(t, newData.Child.Child.Str).Equal("[REDACTED]")
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
+
+		// Both UserMap (map[string]*privateUser) and DataMap (map[string]privateData)
+		// should be nil (zero value) for security reasons to prevent information leaks
+
+		// Check UserMap - maps with unexported types become nil
+		gt.V(t, cloned.UserMap).Nil()
+
+		// Check DataMap - maps with unexported types become nil
+		gt.V(t, cloned.DataMap).Nil()
+	})
+
+	t.Run("unexported maps become nil regardless of filtering", func(t *testing.T) {
+		original := NewMapContainer()
+
+		// Create mask that redacts "password" field
+		mask := masq.NewMasq(masq.WithFieldName("password"))
+		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
+
+		// For security, maps with unexported types become nil regardless of filtering
+		// This prevents any potential information leakage
+		gt.V(t, cloned.UserMap).Nil()
+		gt.V(t, cloned.DataMap).Nil()
+	})
+
+	t.Run("maps with un-interfaceable keys or values return zero", func(t *testing.T) {
+		// This test verifies that maps containing un-interfaceable keys or values
+		// return zero values to prevent information leakage (security improvement)
+
+		// Create a map through reflection that may have un-interfaceable entries
+		type privateKey struct {
+			id string
+		}
+		type container struct {
+			// Map with unexported key type
+			M1 map[privateKey]string
+			// Map that might contain un-interfaceable values
+			M2 map[string]interface{}
+		}
+
+		original := &container{
+			M1: map[privateKey]string{
+				{id: "key1"}: "value1",
+				{id: "key2"}: "value2",
+			},
+			M2: make(map[string]interface{}),
+		}
+
+		// Add some values that might not be interfaceable
+		original.M2["normal"] = "value"
+
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Maps with unexported key types should be nil (zero value) for security
+		gt.V(t, cloned.M1).Nil()
+
+		// M2 should be cloned since it has exported types
+		gt.V(t, fmt.Sprintf("%p", cloned.M2)).NotEqual(fmt.Sprintf("%p", original.M2))
+		gt.V(t, cloned.M2["normal"]).Equal("value")
+	})
+
+	t.Run("maps in unexported fields return zero", func(t *testing.T) {
+		// This test verifies that maps within unexported struct fields
+		// return zero values to prevent information leakage (security improvement)
+		type container struct {
+			Public      string
+			privateMap  map[string]string
+			privateData map[string]struct {
+				value string
+			}
+		}
+
+		original := &container{
+			Public: "public",
+			privateMap: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+			privateData: map[string]struct{ value string }{
+				"data1": {value: "secret1"},
+				"data2": {value: "secret2"},
+			},
+		}
+
+		mask := masq.NewMasq()
+
+		// Should not panic
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Public field should be cloned
+		gt.V(t, cloned.Public).Equal("public")
+
+		// Maps in unexported fields should be nil (zero value) for security
+		gt.V(t, cloned.privateMap).Nil()
+		gt.V(t, cloned.privateData).Nil()
+	})
+
+	t.Run("embedded unexported map types return nil", func(t *testing.T) {
+		// This test verifies behavior of embedded unexported map types
+		// which are different from unexported fields containing maps
+
+		type unexportedMapType map[string]string
+		type ExportedMapType map[string]string
+
+		type container struct {
+			Public string
+			// Embedded unexported map type
+			unexportedMapType
+			// Embedded exported map type (for comparison)
+			ExportedMapType
+			// Regular unexported field containing map (for comparison)
+			privateMap map[string]string
+		}
+
+		original := &container{
+			Public: "public-value",
+			unexportedMapType: unexportedMapType{
+				"embedded1": "value1",
+				"embedded2": "value2",
+			},
+			ExportedMapType: ExportedMapType{
+				"exported1": "exp-value1",
+				"exported2": "exp-value2",
+			},
+			privateMap: map[string]string{
+				"private1": "private-value1",
+				"private2": "private-value2",
+			},
+		}
+
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Basic field should be copied
+		gt.V(t, cloned.Public).Equal("public-value")
+
+		// Security: Embedded unexported map type returns zero value
+		gt.V(t, cloned.unexportedMapType).Equal(unexportedMapType(nil))
+
+		// Embedded exported map type: should be cloned (different reference) because it's accessible
+		gt.V(t, fmt.Sprintf("%p", cloned.ExportedMapType)).NotEqual(fmt.Sprintf("%p", original.ExportedMapType))
+		gt.V(t, len(cloned.ExportedMapType)).Equal(2)
+		gt.V(t, cloned.ExportedMapType["exported1"]).Equal("exp-value1")
+
+		// Security: Regular unexported field returns zero value
+		gt.V(t, cloned.privateMap).Equal(map[string]string(nil))
+	})
+
+	t.Run("interface fields with tag filter become nil", func(t *testing.T) {
+		type Example struct {
+			Data  interface{} `masq:"secret"`
+			Other interface{}
+		}
+
+		original := &Example{
+			Data:  "sensitive-data",
+			Other: "other-data",
+		}
+
+		mask := masq.NewMasq(masq.WithTag("secret"))
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		// Interface field with matching tag becomes nil (limitation)
+		gt.V(t, cloned.Data).Equal(interface{}(nil))
+		// Interface field without tag is preserved
+		gt.V(t, cloned.Other).Equal("other-data")
+	})
+
+	t.Run("unexported interface field becomes nil", func(t *testing.T) {
+		type Example struct {
+			Public  interface{}
+			private interface{}
+		}
+
+		original := &Example{
+			Public:  "public-data",
+			private: "private-data",
+		}
+
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*Example](t, mask.Redact(original))
+
+		// Exported interface field is preserved
+		gt.V(t, cloned.Public).Equal("public-data")
+		// Unexported interface field becomes nil (limitation)
+		gt.V(t, cloned.private).Equal(interface{}(nil))
+	})
+
+	t.Run("deep nesting returns zero value", func(t *testing.T) {
+		// Create deeply nested structure that exceeds maxDepth (32)
+		type nestedStruct struct {
+			Level int
+			Data  string
+			Child *nestedStruct
+		}
+
+		// Create root
+		root := &nestedStruct{Level: 0, Data: "secret", Child: nil}
+		current := root
+
+		// Create nested structure (40 levels > maxDepth of 32)
+		for i := 1; i < 40; i++ {
+			child := &nestedStruct{Level: i, Data: "secret", Child: nil}
+			current.Child = child
+			current = child
+		}
+
+		mask := masq.NewMasq(masq.WithContain("secret"))
+		result := mask.Redact(root)
+
+		// Extract deep part to verify truncation
+		val := reflect.ValueOf(result)
+		if val.Kind() == reflect.Pointer {
+			val = val.Elem()
+		}
+
+		currentVal := val
+		// Navigate to depth 35 (beyond maxDepth)
+		for i := 0; i < 35 && currentVal.IsValid(); i++ {
+			if currentVal.Kind() == reflect.Pointer {
+				if currentVal.IsNil() {
+					break
+				}
+				currentVal = currentVal.Elem()
+			}
+
+			childField := currentVal.FieldByName("Child")
+			if !childField.IsValid() || childField.IsNil() {
+				break
+			}
+			currentVal = childField.Elem()
+		}
+
+		// At depth 35, we should have zero value or invalid value (both are secure)
+		if currentVal.IsValid() {
+			gt.V(t, currentVal.IsZero()).Equal(true)
+		}
+	})
 }
 
 func TestCloneFunc(t *testing.T) {
@@ -897,7 +1352,7 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 
 		// The structs should have different addresses (both are cloned)
 		gt.V(t, fmt.Sprintf("%p", original)).NotEqual(fmt.Sprintf("%p", cloned))
-		
+
 		// Check if the embedded struct fields are copied (not same reference)
 		// Even though we can't directly compare embedded struct addresses,
 		// we can verify the values are copied
@@ -909,7 +1364,7 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 		// Modify original to verify they are independent
 		original.hiddenCredentials.username = "modified-hidden"
 		original.PublicCredentials.Username = "modified-public"
-		
+
 		// Cloned values should remain unchanged
 		gt.V(t, cloned.hiddenCredentials.username).Equal("hidden-user")
 		gt.V(t, cloned.PublicCredentials.Username).Equal("public-user")
@@ -918,12 +1373,12 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 	t.Run("embedded unexported struct fields cannot be redacted", func(t *testing.T) {
 		type hiddenCredentials struct {
 			username string
-			password string  // Should be redacted but can't because it's in unexported struct
+			password string // Should be redacted but can't because it's in unexported struct
 		}
 
 		type container struct {
 			ID       string
-			Password string  // This should be redacted
+			Password string // This should be redacted
 			hiddenCredentials
 		}
 
@@ -942,10 +1397,44 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 
 		// Regular exported field should be redacted
 		gt.V(t, cloned.Password).Equal("[REDACTED]")
-		
+
 		// But embedded unexported struct fields are NOT redacted
 		// even though they contain "password"
 		gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")
+	})
+}
+
+func TestEmbeddedUnexportedStructWithExportedFields(t *testing.T) {
+	t.Run("exported fields in embedded unexported struct", func(t *testing.T) {
+		// Unexported struct type but with EXPORTED fields
+		type hiddenCredentials struct {
+			Username string // Exported field
+			Password string // Exported field
+		}
+
+		type container struct {
+			ID                string
+			hiddenCredentials // Embedded unexported struct
+		}
+
+		original := &container{
+			ID: "test-id",
+			hiddenCredentials: hiddenCredentials{
+				Username: "hidden-user",
+				Password: "hidden-password",
+			},
+		}
+
+		// Test if content filter works on exported fields inside unexported struct
+		mask := masq.NewMasq(masq.WithContain("password"))
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Check if Password field inside embedded unexported struct is redacted
+		t.Logf("Password in embedded unexported struct: %s", cloned.hiddenCredentials.Password)
+
+		// Exported fields in embedded unexported struct CAN be redacted!
+		gt.V(t, cloned.hiddenCredentials.Password).Equal("[REDACTED]")
+		gt.V(t, cloned.hiddenCredentials.Username).Equal("hidden-user") // Doesn't contain "password"
 	})
 }
 
@@ -972,8 +1461,8 @@ func TestInterfaceFieldBehavior(t *testing.T) {
 
 	t.Run("unexported interface field becomes nil", func(t *testing.T) {
 		type Example struct {
-			Public    interface{}
-			private   interface{}
+			Public  interface{}
+			private interface{}
 		}
 
 		original := &Example{
