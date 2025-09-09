@@ -1,9 +1,14 @@
 package masq
 
-func NewMasq(options ...Option) *masq {
+// Masq is exported for testing
+type Masq = masq
+
+// NewMasq creates a new masq instance for testing
+func NewMasq(options ...Option) *Masq {
 	return newMasq(options...)
 }
 
-func (x *masq) Redact(v any) any {
+// Redact is exported for testing
+func (x *Masq) Redact(v any) any {
 	return x.redact("", v)
 }
