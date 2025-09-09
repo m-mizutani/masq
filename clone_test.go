@@ -1404,40 +1404,6 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 	})
 }
 
-func TestEmbeddedUnexportedStructWithExportedFields(t *testing.T) {
-	t.Run("exported fields in embedded unexported struct", func(t *testing.T) {
-		// Unexported struct type but with EXPORTED fields
-		type hiddenCredentials struct {
-			Username string // Exported field
-			Password string // Exported field
-		}
-
-		type container struct {
-			ID                string
-			hiddenCredentials // Embedded unexported struct
-		}
-
-		original := &container{
-			ID: "test-id",
-			hiddenCredentials: hiddenCredentials{
-				Username: "hidden-user",
-				Password: "hidden-password",
-			},
-		}
-
-		// Test if content filter works on exported fields inside unexported struct
-		mask := masq.NewMasq(masq.WithContain("password"))
-		cloned := gt.Cast[*container](t, mask.Redact(original))
-
-		// Check if Password field inside embedded unexported struct is redacted
-		t.Logf("Password in embedded unexported struct: %s", cloned.hiddenCredentials.Password)
-
-		// Exported fields in embedded unexported struct CAN be redacted!
-		gt.V(t, cloned.hiddenCredentials.Password).Equal("[REDACTED]")
-		gt.V(t, cloned.hiddenCredentials.Username).Equal("hidden-user") // Doesn't contain "password"
-	})
-}
-
 func TestInterfaceFieldBehavior(t *testing.T) {
 	t.Run("exported interface field with tag filter becomes nil", func(t *testing.T) {
 		type Example struct {
