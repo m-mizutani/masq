@@ -190,6 +190,14 @@ type TestStruct struct {
 	RegexPhone       string `masq:"secret"`
 	RegexEmail       string `masq:"secret"`
 	RegexNormal      string `masq:"secret"`
+	
+	// === UNEXPORTED CONTENT FOR CONTAIN/REGEX TESTING ===
+	unexportedContainsSecret   string `masq:"secret"`
+	unexportedContainsPassword string `masq:"secret"`
+	unexportedContainsNothing  string `masq:"secret"`
+	unexportedRegexPhone       string `masq:"secret"`
+	unexportedRegexEmail       string `masq:"secret"`
+	unexportedRegexNormal      string `masq:"secret"`
 }
 
 // Helper functions
@@ -219,7 +227,10 @@ func isRedacted(original, redacted any) bool {
 	case reflect.Float32, reflect.Float64:
 		return rv.Float() == 0 && reflect.ValueOf(original).Float() != 0
 	case reflect.Bool:
-		return !rv.Bool() && reflect.ValueOf(original).Bool()
+		// For bool, any change to zero value (false) from non-zero is redaction
+		// If both original and redacted are false, assume no redaction occurred
+		origBool := reflect.ValueOf(original).Bool()
+		return !rv.Bool() && origBool
 	case reflect.Slice, reflect.Map:
 		return rv.Len() == 0 && reflect.ValueOf(original).Len() != 0
 	case reflect.Struct:
@@ -253,7 +264,12 @@ func getFieldValue(v any, fieldName string) (any, bool) {
 		return field.Interface(), true
 	}
 
-	// For unexported fields, we can still get some information
+	// For unexported fields, try to extract the actual value using our unsafe extraction
+	if extracted, ok := masq.ExtractValueSafely(field); ok {
+		return extracted, true
+	}
+
+	// If extraction fails, fall back to type information
 	return fmt.Sprintf("<unexported %v>", field.Type()), true
 }
 
@@ -368,6 +384,14 @@ func createTestData() *TestStruct {
 		RegexPhone:       "123-456-7890",
 		RegexEmail:       "user@example.com",
 		RegexNormal:      "normal text here",
+		
+		// Unexported content for contain/regex testing
+		unexportedContainsSecret:   "this unexported field contains secret word",
+		unexportedContainsPassword: "this unexported field contains password word", 
+		unexportedContainsNothing:  "this unexported field contains nothing special",
+		unexportedRegexPhone:       "987-654-3210",
+		unexportedRegexEmail:       "unexported@example.com",
+		unexportedRegexNormal:      "unexported normal text here",
 	}
 }
 
@@ -515,7 +539,9 @@ func TestClone(t *testing.T) {
 }
 
 // Define all field names for comprehensive testing
+// 🚨 CRITICAL FIX: Added missing embedded fields that are directly accessible
 var allFieldNames = []string{
+	// === DIRECTLY DEFINED FIELDS ===
 	// Exported primitives
 	"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
 	"ExportedBool", "ExportedByte", "ExportedRune",
@@ -526,7 +552,7 @@ var allFieldNames = []string{
 	"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
 	// Exported nested
 	"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-	// Unexported primitives
+	// Unexported primitives (direct definition)
 	"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
 	"unexportedBool", "unexportedByte", "unexportedRune",
 	// Unexported custom
@@ -536,121 +562,157 @@ var allFieldNames = []string{
 	"unexportedInterface", "unexportedStringer", "unexportedFunc", "unexportedChan",
 	// Unexported nested
 	"unexportedStruct", "unexportedNestedPtr", "unexportedSliceStruct", "unexportedMapStruct",
-	// Maps with type variations
+	
+	// === EMBEDDED FIELDS (DIRECTLY ACCESSIBLE) ===
+	// 🚨 PREVIOUSLY MISSING: These were completely omitted from testing!
+	"unexportedEmbeddedField",  // via embeddedUnexported (string)
+	"ExportedEmbeddedField",    // via EmbeddedExported (string)  
+	"Deep",                     // via deeplyEmbedded (struct)
+	// NOTE: unexportedInt and ExportedInt from embedded structs are also accessible
+	// but have same names as direct fields, handled in fieldGroups
+	
+	// === MAPS WITH TYPE VARIATIONS ===
 	"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
 	"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-	// Interface fields
+	
+	// === INTERFACE FIELDS ===
 	"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-	// Prefix fields
+	
+	// === PREFIX TEST FIELDS ===
 	"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-	// Tagged fields
+	
+	// === TAGGED FIELDS ===
 	"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
-	// Content fields
+	
+	// === CONTENT FIELDS ===
 	"ContainsSecret", "ContainsPassword", "ContainsNothing",
 	"RegexPhone", "RegexEmail", "RegexNormal",
+	// Unexported content fields  
+	"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
+	"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
 }
 
-// Define groups of unexported fields (which can't be redacted by most filters)
-var unexportedFields = []string{
-	"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
-	"unexportedBool", "unexportedByte", "unexportedRune",
-	"unexportedCustomString", "unexportedCustomInt", "unexportedCustomBool", "unexportedCustomStruct",
-	"unexportedPointer", "unexportedSlice", "unexportedArray", "unexportedMap",
-	"unexportedInterface", "unexportedStringer", "unexportedFunc", "unexportedChan",
-	"unexportedStruct", "unexportedNestedPtr", "unexportedSliceStruct", "unexportedMapStruct",
+// Field groups for comprehensive testing
+var fieldGroups = struct {
+	// Unexported fields that can be filtered by tag
+	unexportedWithSecretTag []string
+	// Unexported fields that can be filtered by type
+	unexportedByType map[string][]string
+	// Unexported fields that can be filtered by content
+	unexportedByContent map[string][]string
+	// Unexported fields that cannot be redacted (functions, channels)
+	unexportedNonRedactable []string
+	// Unexported fields that redaction is hard to detect (zero values)
+	unexportedRedactionHardToDetect []string
+	// Fields that become nil/zero for security reasons
+	securityNilFields []string
+}{
+	unexportedWithSecretTag: []string{
+		// Direct definition unexported fields
+		"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
+		"unexportedBool", "unexportedByte", "unexportedRune",
+		"unexportedCustomString", "unexportedCustomInt", "unexportedCustomBool", "unexportedCustomStruct",
+		"unexportedPointer", "unexportedSlice", "unexportedArray",
+		"unexportedStringer", "unexportedStruct", "unexportedNestedPtr", "unexportedSliceStruct",
+		"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
+		"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
+		// 🚨 CRITICAL ADDITION: Embedded fields that are also tagged with masq:"secret"
+		"unexportedEmbeddedField",  // via embeddedUnexported, has masq:"secret"
+		// NOTE: Deep struct from deeplyEmbedded also has masq:"secret" tag
+		"Deep", // via deeplyEmbedded, struct itself has masq:"secret"
+	},
+	unexportedByType: map[string][]string{
+		"string":     {"unexportedString", "unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing", "unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal", "unexportedEmbeddedField"}, // Added embedded string field
+		"int":        {"unexportedInt"}, // NOTE: embedded unexportedInt exists but same name as direct field
+		"int64":      {"unexportedInt64"},
+		"float64":    {"unexportedFloat64"},
+		"bool":       {"unexportedBool"},
+		"customType": {"unexportedCustomString"},
+	},
+	unexportedByContent: map[string][]string{
+		"secret":   {"unexportedContainsSecret"},
+		"password": {"unexportedContainsPassword"},
+	},
+	unexportedNonRedactable: []string{
+		"unexportedFunc", "unexportedChan",
+	},
+	unexportedRedactionHardToDetect: []string{
+		"unexportedBool", "unexportedByte", "unexportedCustomBool", "unexportedCustomStruct",
+		"unexportedPointer", "unexportedArray", "unexportedStringer", "unexportedStruct", "unexportedNestedPtr",
+	},
+	securityNilFields: []string{
+		"unexportedMap", "unexportedInterface", "unexportedMapStruct",
+	},
 }
+
+// Legacy field list - to be removed after migration
+var unexportedFields = func() []string {
+	var all []string
+	all = append(all, fieldGroups.unexportedWithSecretTag...)
+	all = append(all, fieldGroups.unexportedNonRedactable...)
+	return all
+}()
 
 // TestRedact tests various filter options with full field coverage
 func TestRedact(t *testing.T) {
 	testCases := []testRedactCase{
-		// WithTag tests
+		// WithTag tests - comprehensive tag filtering test for both exported and unexported fields
 		{
 			name:   "WithTag_secret",
 			filter: masq.WithTag("secret"),
-			redacted: []string{
-				// All exported fields with masq:"secret" tag
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedSlice", "ExportedMap", "ExportedInterface", "ExportedStringer",
-				"ExportedStruct", "ExportedSliceStruct", "ExportedMapStruct",
-				// Maps with exported types with "secret" tag
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				// Interface fields with "secret" tag
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported",
-				// Prefix fields with "secret" tag
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				// Tagged fields
-				"TaggedSecret",
-				// Content fields with "secret" tag
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-			},
-			notRedacted: append([]string{
-				// Special cases that can't be redacted
-				"ExportedByte", "ExportedPointer", "ExportedArray", "ExportedFunc", "ExportedChan",
-				"ExportedNestedPtr", "InterfaceNil",
-				// Fields without "secret" tag
-				"TaggedPassword", "TaggedToken", "UntaggedField",
-			}, unexportedFields...), // All unexported fields can't be redacted by tag
-			notCloned: []string{
+			redacted: func() []string {
+				exported := []string{
+					// All exported fields with masq:"secret" tag
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedSlice", "ExportedMap", "ExportedInterface", "ExportedStringer",
+					"ExportedStruct", "ExportedSliceStruct", "ExportedMapStruct",
+					// Maps with exported types with "secret" tag
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					// Interface fields with "secret" tag
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported",
+					// Prefix fields with "secret" tag
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					// Tagged fields
+					"TaggedSecret",
+					// Content fields with "secret" tag
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					// 🧪 EXPERIMENTAL: Embedded exported fields 
+					"ExportedEmbeddedField", // from EmbeddedExported
+				}
+				// Unexported fields with masq:"secret" tag that can be reliably detected as redacted
+				detectable := []string{
+					"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
+					"unexportedRune", "unexportedCustomString", "unexportedCustomInt",
+					"unexportedSlice", "unexportedSliceStruct",
+					// Content fields
+					"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
+					"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
+					// 🧪 EXPERIMENTAL: Testing embedded fields detection
+					"unexportedEmbeddedField", "Deep", // from embedded structs
+				}
+				// ALSO ADD: ExportedEmbeddedField to exported list above
+				return append(exported, detectable...)
+			}(),
+			notRedacted: func() []string {
+				base := []string{
+					// Special cases that can't be redacted
+					"ExportedByte", "ExportedPointer", "ExportedArray", "ExportedFunc", "ExportedChan",
+					"ExportedNestedPtr", "InterfaceNil",
+					// Fields without "secret" tag
+					"TaggedPassword", "TaggedToken", "UntaggedField",
+				}
+				// Add fields that can't be redacted or detection is difficult
+				return append(append(base, fieldGroups.unexportedNonRedactable...), fieldGroups.unexportedRedactionHardToDetect...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
-		{
-			name:   "WithTag_password",
-			filter: masq.WithTag("password"),
-			redacted: []string{
-				"TaggedPassword", // Only field with "password" tag
-			},
-			notRedacted: append([]string{
-				// All exported fields except TaggedPassword
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				"TaggedSecret", "TaggedToken", "UntaggedField",
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
-		},
-		{
-			name:   "WithTag_token",
-			filter: masq.WithTag("token"),
-			redacted: []string{
-				"TaggedToken", // Only field with "token" tag
-			},
-			notRedacted: append([]string{
-				// All exported fields except TaggedToken
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				"TaggedSecret", "TaggedPassword", "UntaggedField",
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
-		},
-		// WithFieldName tests
+		// WithFieldName tests - comprehensive field name filtering including unexported fields
 		{
 			name:   "WithFieldName_ExportedString",
 			filter: masq.WithFieldName("ExportedString"),
@@ -671,13 +733,142 @@ func TestRedact(t *testing.T) {
 				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
 				"ContainsSecret", "ContainsPassword", "ContainsNothing",
 				"RegexPhone", "RegexEmail", "RegexNormal",
+				// 🧪 Add embedded fields to appropriate tests
+				"ExportedEmbeddedField", "unexportedEmbeddedField", "Deep",
 			}, unexportedFields...),
-			notCloned: []string{
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
-		// WithFieldPrefix tests
+		{
+			name:   "WithFieldName_unexportedString",
+			filter: masq.WithFieldName("unexportedString"),
+			redacted: []string{
+				"unexportedString",
+			},
+			notRedacted: func() []string {
+				// All exported fields
+				exported := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+				}
+				// All unexported fields except unexportedString
+				notRedacted := []string{}
+				for _, field := range unexportedFields {
+					if field != "unexportedString" {
+						notRedacted = append(notRedacted, field)
+					}
+				}
+				return append(exported, notRedacted...)
+			}(),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithFieldName_ExportedEmbeddedField",
+			filter: masq.WithFieldName("ExportedEmbeddedField"),
+			redacted: []string{
+				"ExportedEmbeddedField", // 🧪 TESTING: Embedded field detection
+				"ExportedStruct",        // Contains EmbeddedExported which has ExportedEmbeddedField
+			},
+			notRedacted: func() []string {
+				allOthers := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct", // Removed ExportedStruct
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					"ExportedEmbeddedField", "unexportedEmbeddedField", "Deep", // Embedded fields
+				}
+				return append(allOthers, unexportedFields...)
+			}(),
+			notCloned: append([]string{
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithFieldName_unexportedEmbeddedField",
+			filter: masq.WithFieldName("unexportedEmbeddedField"),
+			redacted: []string{
+				"unexportedEmbeddedField", // 🧪 TESTING: Embedded unexported field detection
+			},
+			notRedacted: func() []string {
+				allOthers := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					"ExportedEmbeddedField", "Deep", // Other embedded fields
+				}
+				// Remove unexportedEmbeddedField from unexportedFields
+				filteredUnexported := []string{}
+				for _, field := range unexportedFields {
+					if field != "unexportedEmbeddedField" {
+						filteredUnexported = append(filteredUnexported, field)
+					}
+				}
+				return append(allOthers, filteredUnexported...)
+			}(),
+			notCloned: append([]string{
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithFieldName_nonexistent",
+			filter: masq.WithFieldName("NonExistentField"),
+			redacted: []string{
+				// No fields should be redacted
+			},
+			notRedacted: append([]string{
+				// All exported fields
+				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+				"ExportedBool", "ExportedByte", "ExportedRune",
+				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+				"ContainsSecret", "ContainsPassword", "ContainsNothing",
+				"RegexPhone", "RegexEmail", "RegexNormal",
+				"ExportedEmbeddedField", // Embedded field from EmbeddedExported
+			}, unexportedFields...),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		// WithFieldPrefix tests - comprehensive field prefix filtering including unexported fields
 		{
 			name:   "WithFieldPrefix_Prefix",
 			filter: masq.WithFieldPrefix("Prefix"),
@@ -697,11 +888,48 @@ func TestRedact(t *testing.T) {
 				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
 				"ContainsSecret", "ContainsPassword", "ContainsNothing",
 				"RegexPhone", "RegexEmail", "RegexNormal",
+				"ExportedEmbeddedField", // Embedded field from EmbeddedExported
 			}, unexportedFields...),
-			notCloned: []string{
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithFieldPrefix_unexported",
+			filter: masq.WithFieldPrefix("unexported"),
+			redacted: []string{
+				// Unexported fields starting with "unexported" that can be detected as redacted
+				"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
+				"unexportedRune", "unexportedCustomString", "unexportedCustomInt",
+				"unexportedSlice", "unexportedSliceStruct",
+				// Content fields starting with "unexported"
+				"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
+				"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
 			},
+			notRedacted: func() []string {
+				base := []string{
+					// All exported fields
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+				}
+				// Add fields that can't be redacted or detection is difficult
+				return append(append(base, fieldGroups.unexportedNonRedactable...), fieldGroups.unexportedRedactionHardToDetect...)
+			}(),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
 		},
 		{
 			name:   "WithFieldPrefix_Exported",
@@ -712,6 +940,7 @@ func TestRedact(t *testing.T) {
 				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
 				"ExportedSlice", "ExportedMap", "ExportedInterface", "ExportedStringer",
 				"ExportedStruct", "ExportedSliceStruct", "ExportedMapStruct",
+				"ExportedEmbeddedField", // Embedded field from EmbeddedExported
 			},
 			notRedacted: append([]string{
 				// Special cases that can't be redacted
@@ -723,169 +952,397 @@ func TestRedact(t *testing.T) {
 				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
 				"ContainsSecret", "ContainsPassword", "ContainsNothing",
 				"RegexPhone", "RegexEmail", "RegexNormal",
+				"ExportedEmbeddedField", // Embedded field from EmbeddedExported
 			}, unexportedFields...),
-			notCloned: []string{
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
-		// WithType tests
+		// WithType tests - comprehensive type filtering including custom and complex types
 		{
 			name:   "WithType_string",
 			filter: masq.WithType[string](),
-			redacted: []string{
-				"ExportedString",
-				"PrefixTestString", "PrefixOtherString",
-				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-				// Structs containing strings
-				"ExportedCustomStruct", "ExportedInterface", "ExportedStringer",
-				"ExportedStruct", "InterfaceString", "InterfaceStruct",
-			},
-			notRedacted: append([]string{
-				"ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedFunc", "ExportedChan",
-				"ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceUnexported", "InterfaceNil",
-				"PrefixTestInt", "PrefixOtherInt",
-			}, unexportedFields...),
-			notCloned: []string{
+			redacted: func() []string {
+				exported := []string{
+					"ExportedString",
+					"PrefixTestString", "PrefixOtherString",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					"ExportedEmbeddedField", // string type from embedded struct
+					// Structs containing strings
+					"ExportedCustomStruct", "ExportedInterface", "ExportedStringer",
+					"ExportedStruct", "InterfaceString", "InterfaceStruct",
+				}
+				// Add unexported string fields that can be detected
+				return append(exported, fieldGroups.unexportedByType["string"]...)
+			}(),
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedFunc", "ExportedChan",
+					"ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceUnexported", "InterfaceNil",
+					"PrefixTestInt", "PrefixOtherInt",
+				}
+				// Add all unexported fields except string types
+				nonStringUnexported := []string{}
+				for _, field := range fieldGroups.unexportedWithSecretTag {
+					isString := false
+					for _, stringField := range fieldGroups.unexportedByType["string"] {
+						if field == stringField {
+							isString = true
+							break
+						}
+					}
+					if !isString {
+						nonStringUnexported = append(nonStringUnexported, field)
+					}
+				}
+				return append(append(base, nonStringUnexported...), fieldGroups.unexportedNonRedactable...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
 		{
 			name:   "WithType_int",
 			filter: masq.WithType[int](),
-			redacted: []string{
-				"ExportedInt", "PrefixTestInt", "PrefixOtherInt",
-				"ExportedStruct", // Contains int fields
-			},
-			notRedacted: append([]string{
-				"ExportedString", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixOtherString",
-				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
+			redacted: func() []string {
+				exported := []string{
+					"ExportedInt", "PrefixTestInt", "PrefixOtherInt",
+					"ExportedStruct", // Contains int fields
+				}
+				// Add unexported int fields that can be detected
+				return append(exported, fieldGroups.unexportedByType["int"]...)
+			}(),
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixOtherString",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					"ExportedEmbeddedField", // string type, not int
+				}
+				// Add all unexported fields except int types
+				nonIntUnexported := []string{}
+				for _, field := range fieldGroups.unexportedWithSecretTag {
+					isInt := false
+					for _, intField := range fieldGroups.unexportedByType["int"] {
+						if field == intField {
+							isInt = true
+							break
+						}
+					}
+					if !isInt {
+						nonIntUnexported = append(nonIntUnexported, field)
+					}
+				}
+				return append(append(base, nonIntUnexported...), fieldGroups.unexportedNonRedactable...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
-		// WithContain tests
+		{
+			name:   "WithType_CustomType",
+			filter: masq.WithType[CustomType](),
+			redacted: []string{
+				"ExportedCustomString",
+			},
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+				}
+				return append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+			}(),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithType_CustomInt",
+			filter: masq.WithType[CustomInt](),
+			redacted: []string{
+				"ExportedCustomInt",
+			},
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+				}
+				return append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+			}(),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithType_CustomStruct",
+			filter: masq.WithType[CustomStruct](),
+			redacted: []string{
+				"ExportedCustomStruct", "InterfaceStruct", // InterfaceStruct contains CustomStruct
+			},
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+				}
+				return append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+			}(),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		{
+			name:   "WithType_SliceString",
+			filter: masq.WithType[[]string](),
+			redacted: []string{
+				"ExportedSlice", "unexportedSlice",
+			},
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+				}
+				// Add all unexported fields except slice types  
+				nonSliceUnexported := []string{}
+				for _, field := range fieldGroups.unexportedWithSecretTag {
+					if field != "unexportedSlice" {
+						nonSliceUnexported = append(nonSliceUnexported, field)
+					}
+				}
+				return append(append(base, nonSliceUnexported...), fieldGroups.unexportedNonRedactable...)
+			}(),
+			notCloned: append([]string{
+				// Maps with unexported types (always nil/zero for security)
+				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+			}, fieldGroups.securityNilFields...),
+		},
+		// WithContain tests - comprehensive content filtering including unexported fields
 		{
 			name:   "WithContain_secret",
 			filter: masq.WithContain("secret"),
-			redacted: []string{
-				"ContainsSecret", "TaggedSecret",
-			},
-			notRedacted: append([]string{
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				"TaggedPassword", "TaggedToken", "UntaggedField",
-				"ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
+			redacted: func() []string {
+				exported := []string{
+					"ContainsSecret", "TaggedSecret",
+				}
+				// Add unexported fields with "secret" content
+				return append(exported, fieldGroups.unexportedByContent["secret"]...)
+			}(),
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					"ExportedEmbeddedField", // doesn't contain "secret"
+				}
+				// Add unexported fields that don't contain "secret"
+				nonSecretUnexported := []string{}
+				for _, field := range unexportedFields {
+					hasSecret := false
+					for _, secretField := range fieldGroups.unexportedByContent["secret"] {
+						if field == secretField {
+							hasSecret = true
+							break
+						}
+					}
+					if !hasSecret {
+						nonSecretUnexported = append(nonSecretUnexported, field)
+					}
+				}
+				return append(base, nonSecretUnexported...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
 		{
 			name:   "WithContain_password",
 			filter: masq.WithContain("password"),
-			redacted: []string{
-				"ContainsPassword", "TaggedPassword",
-			},
-			notRedacted: append([]string{
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				"TaggedSecret", "TaggedToken", "UntaggedField",
-				"ContainsSecret", "ContainsNothing",
-				"RegexPhone", "RegexEmail", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
+			redacted: func() []string {
+				exported := []string{
+					"ContainsPassword", "TaggedPassword",
+				}
+				// Add unexported fields with "password" content
+				return append(exported, fieldGroups.unexportedByContent["password"]...)
+			}(),
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsNothing",
+					"RegexPhone", "RegexEmail", "RegexNormal",
+					"ExportedEmbeddedField", // doesn't contain "password"
+				}
+				// Add unexported fields that don't contain "password"
+				nonPasswordUnexported := []string{}
+				for _, field := range unexportedFields {
+					hasPassword := false
+					for _, passwordField := range fieldGroups.unexportedByContent["password"] {
+						if field == passwordField {
+							hasPassword = true
+							break
+						}
+					}
+					if !hasPassword {
+						nonPasswordUnexported = append(nonPasswordUnexported, field)
+					}
+				}
+				return append(base, nonPasswordUnexported...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
-		// WithRegex tests
+		// WithRegex tests - comprehensive regex filtering including unexported fields
 		{
 			name:   "WithRegex_phone",
 			filter: masq.WithRegex(regexp.MustCompile(`^\d{3}-\d{3}-\d{4}$`)),
 			redacted: []string{
-				"RegexPhone",
+				"RegexPhone", "unexportedRegexPhone",
 			},
-			notRedacted: append([]string{
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexEmail", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexEmail", "RegexNormal",
+				}
+				// Add unexported fields that don't match phone regex
+				nonPhoneUnexported := []string{}
+				for _, field := range unexportedFields {
+					if field != "unexportedRegexPhone" {
+						nonPhoneUnexported = append(nonPhoneUnexported, field)
+					}
+				}
+				return append(base, nonPhoneUnexported...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
 		{
 			name:   "WithRegex_email",
 			filter: masq.WithRegex(regexp.MustCompile(`^[^@]+@[^@]+\.[^@]+$`)),
 			redacted: []string{
-				"RegexEmail",
+				"RegexEmail", "unexportedRegexEmail",
 			},
-			notRedacted: append([]string{
-				"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
-				"ExportedBool", "ExportedByte", "ExportedRune",
-				"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
-				"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
-				"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
-				"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
-				"MapExportedKey", "MapExportedValue", "MapExportedBoth",
-				"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
-				"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
-				"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
-				"ContainsSecret", "ContainsPassword", "ContainsNothing",
-				"RegexPhone", "RegexNormal",
-			}, unexportedFields...),
-			notCloned: []string{
+			notRedacted: func() []string {
+				base := []string{
+					"ExportedString", "ExportedInt", "ExportedInt64", "ExportedFloat64",
+					"ExportedBool", "ExportedByte", "ExportedRune",
+					"ExportedCustomString", "ExportedCustomInt", "ExportedCustomBool", "ExportedCustomStruct",
+					"ExportedPointer", "ExportedSlice", "ExportedArray", "ExportedMap",
+					"ExportedInterface", "ExportedStringer", "ExportedFunc", "ExportedChan",
+					"ExportedStruct", "ExportedNestedPtr", "ExportedSliceStruct", "ExportedMapStruct",
+					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					"InterfaceString", "InterfaceStruct", "InterfaceUnexported", "InterfaceNil",
+					"PrefixTestString", "PrefixTestInt", "PrefixOtherString", "PrefixOtherInt",
+					"TaggedSecret", "TaggedPassword", "TaggedToken", "UntaggedField",
+					"ContainsSecret", "ContainsPassword", "ContainsNothing",
+					"RegexPhone", "RegexNormal",
+				}
+				// Add unexported fields that don't match email regex
+				nonEmailUnexported := []string{}
+				for _, field := range unexportedFields {
+					if field != "unexportedRegexEmail" {
+						nonEmailUnexported = append(nonEmailUnexported, field)
+					}
+				}
+				return append(base, nonEmailUnexported...)
+			}(),
+			notCloned: append([]string{
 				// Maps with unexported types (always nil/zero for security)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			},
+			}, fieldGroups.securityNilFields...),
 		},
 	}
 

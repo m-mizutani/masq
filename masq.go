@@ -40,7 +40,46 @@ func newMasq(options ...Option) *masq {
 	m.defaultRedactor = func(src, dst reflect.Value) bool {
 		switch src.Kind() {
 		case reflect.String:
-			dst.Elem().SetString(m.redactMessage)
+			if dst.Elem().CanSet() {
+				dst.Elem().SetString(m.redactMessage)
+			} else {
+				// For unexported fields, use unsafe operations
+				if dst.Elem().CanAddr() {
+					unsafeCopyValue(dst.Elem(), reflect.ValueOf(m.redactMessage))
+				}
+			}
+		case reflect.Bool:
+			defaultBool := false
+			if dst.Elem().CanSet() {
+				dst.Elem().SetBool(defaultBool)
+			} else if dst.Elem().CanAddr() {
+				unsafeCopyValue(dst.Elem(), reflect.ValueOf(defaultBool))
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			defaultInt := int64(0)
+			if dst.Elem().CanSet() {
+				dst.Elem().SetInt(defaultInt)
+			} else if dst.Elem().CanAddr() {
+				// For typed integers, create zero value of the same type
+				zeroVal := reflect.Zero(dst.Elem().Type())
+				unsafeCopyValue(dst.Elem(), zeroVal)
+			}
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			defaultUint := uint64(0)
+			if dst.Elem().CanSet() {
+				dst.Elem().SetUint(defaultUint)
+			} else if dst.Elem().CanAddr() {
+				zeroVal := reflect.Zero(dst.Elem().Type())
+				unsafeCopyValue(dst.Elem(), zeroVal)
+			}
+		default:
+			// For other types (structs, slices, etc.), try to set to zero value
+			if dst.Elem().CanSet() {
+				dst.Elem().Set(reflect.Zero(src.Type()))
+			} else if dst.Elem().CanAddr() {
+				zeroVal := reflect.Zero(dst.Elem().Type())
+				unsafeCopyValue(dst.Elem(), zeroVal)
+			}
 		}
 		return true
 	}

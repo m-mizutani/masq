@@ -1,5 +1,7 @@
 package masq
 
+import "reflect"
+
 // Masq is exported for testing
 type Masq = masq
 
@@ -11,4 +13,9 @@ func NewMasq(options ...Option) *Masq {
 // Redact is exported for testing
 func (x *Masq) Redact(v any) any {
 	return x.redact("", v)
+}
+
+// ExtractValueSafely is exported for testing private field access
+func ExtractValueSafely(v reflect.Value) (interface{}, bool) {
+	return extractValueSafely(v)
 }
