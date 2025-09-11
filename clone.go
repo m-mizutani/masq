@@ -448,17 +448,13 @@ func isUnexported(t reflect.Type) bool {
 
 // canRedactType checks if a type can be safely cloned.
 // This includes basic types that extractValueSafely can handle and
-// struct types (which can always be cloned, with non-redactable fields becoming nil/zero).
+// struct types (which can always be cloned, with fields that cannot be redacted becoming nil/zero).
 func canRedactType(t reflect.Type) bool {
 	// For pointer types, check the element type first
 	if t.Kind() == reflect.Pointer {
 		return canRedactType(t.Elem())
 	}
 
-	// Built-in types (non-pointer types with empty PkgPath) are always redactable
-	if t.PkgPath() == "" && t.Kind() != reflect.Pointer {
-		return true
-	}
 
 	// For struct types, always allow cloning
 	// Individual fields that cannot be redacted will become nil/zero values
@@ -485,7 +481,7 @@ func canRedactType(t reflect.Type) bool {
 		reflect.Complex64, reflect.Complex128:
 		return true
 	case reflect.Interface:
-		// Interfaces can potentially hold redactable values
+		// Interfaces can potentially hold values that can be redacted
 		return true
 	case reflect.Chan, reflect.Func:
 		// Functions and channels can be redacted (replaced with safe values)
@@ -494,7 +490,7 @@ func canRedactType(t reflect.Type) bool {
 		// Unsafe pointers cannot be safely redacted
 		return false
 	default:
-		// Unknown types are considered non-redactable for safety
+		// Unknown types cannot be redacted for safety
 		return false
 	}
 }
