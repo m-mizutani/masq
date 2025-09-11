@@ -625,7 +625,7 @@ func TestCloneNotCloned(t *testing.T) {
 			// Map with unexported types containing non-redactable fields
 			FuncMap map[string]*privateFunc
 		}
-		
+
 		original := &container{
 			FuncMap: map[string]*privateFunc{
 				"key1": {fn: func() string { return "value1" }},
@@ -667,8 +667,8 @@ func TestCloneNotCloned(t *testing.T) {
 
 		// Create a map with mixed field types
 		type privateValueWithFunc struct {
-			id string  // redactable field (preserved)
-			fn func()  // non-redactable field (becomes nil)
+			id string // redactable field (preserved)
+			fn func() // non-redactable field (becomes nil)
 		}
 		type container struct {
 			// Map with unexported value type containing mixed fields
@@ -694,11 +694,11 @@ func TestCloneNotCloned(t *testing.T) {
 		// Maps CAN be cloned (structure preserved, function fields become nil)
 		gt.V(t, cloned.M1).NotNil()
 		gt.V(t, len(cloned.M1)).Equal(2)
-		
+
 		// Check that id fields are preserved but fn fields become nil
 		gt.V(t, cloned.M1["key1"]).NotNil()
-		gt.V(t, cloned.M1["key1"].id).Equal("val1")  // String field preserved
-		gt.V(t, cloned.M1["key1"].fn).NotNil()        // Function field is copied consistently
+		gt.V(t, cloned.M1["key1"].id).Equal("val1") // String field preserved
+		gt.V(t, cloned.M1["key1"].fn).NotNil()      // Function field is copied consistently
 
 		// M2 should be cloned since it has exported types
 		gt.V(t, fmt.Sprintf("%p", cloned.M2)).NotEqual(fmt.Sprintf("%p", original.M2))
@@ -1105,7 +1105,7 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		type container struct {
 			FuncMap map[string]*privateWithFunc
 		}
-		
+
 		original := &container{
 			FuncMap: map[string]*privateWithFunc{
 				"key": {value: "val", fn: func() {}},
@@ -1118,10 +1118,9 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		// Maps CAN be cloned now (structure preserved, function field becomes nil)
 		gt.V(t, cloned.FuncMap).NotNil()
 		gt.V(t, cloned.FuncMap["key"]).NotNil()
-		gt.V(t, cloned.FuncMap["key"].value).Equal("val")  // String field preserved
-		gt.V(t, cloned.FuncMap["key"].fn).NotNil()         // Function field is copied consistently
+		gt.V(t, cloned.FuncMap["key"].value).Equal("val") // String field preserved
+		gt.V(t, cloned.FuncMap["key"].fn).NotNil()        // Function field is copied consistently
 	})
-
 
 	t.Run("maps in unexported fields return zero values for security", func(t *testing.T) {
 		// This test verifies that maps within unexported struct fields
@@ -1339,7 +1338,7 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 
 		// Map with redactable unexported key type can now be cloned
 		gt.V(t, cloned.Data).NotEqual(map[complexKey]string(nil))
-		gt.V(t, len(cloned.Data)).Equal(3)  // Should have same number of entries
+		gt.V(t, len(cloned.Data)).Equal(3) // Should have same number of entries
 	})
 }
 

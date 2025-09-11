@@ -1496,11 +1496,11 @@ func TestComplexTypePatterns(t *testing.T) {
 
 		// Maps with redactable unexported types CAN now be cloned
 		// unexportedKeyType and unexportedValueType are string-based, so they're redactable
-		gt.V(t, len(result.MapUnexportedKey)).Equal(2)  // Can be cloned now (2 elements in test data)
-		gt.V(t, len(result.MapUnexportedValue)).Equal(2)  // Can be cloned now (2 elements in test data)
-		
+		gt.V(t, len(result.MapUnexportedKey)).Equal(2)   // Can be cloned now (2 elements in test data)
+		gt.V(t, len(result.MapUnexportedValue)).Equal(2) // Can be cloned now (2 elements in test data)
+
 		// Both key and value are redactable unexported types
-		gt.V(t, len(result.MapUnexportedBoth)).Equal(2)  // Can be cloned now (2 elements in test data)
+		gt.V(t, len(result.MapUnexportedBoth)).Equal(2) // Can be cloned now (2 elements in test data)
 
 		// Map with exported types should be preserved
 		gt.V(t, result.MapExportedBoth).Equal(testData.MapExportedBoth)
