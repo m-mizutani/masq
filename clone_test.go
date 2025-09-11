@@ -619,7 +619,7 @@ func TestCloneNotCloned(t *testing.T) {
 		// Structures with non-redactable fields can still be cloned
 		// The non-redactable fields become nil/zero values
 		type privateFunc struct {
-			fn func() string // function types cannot be redacted (becomes nil)
+			fn func() string // function types are copied by reference, not deeply cloned
 		}
 		type container struct {
 			// Map with unexported types containing non-redactable fields
@@ -635,7 +635,7 @@ func TestCloneNotCloned(t *testing.T) {
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Map CAN be cloned now (structure is cloned, but fn field becomes nil)
+		// Map CAN be cloned now (structure and function references are copied)
 		gt.V(t, cloned.FuncMap).NotNil()
 		gt.V(t, len(cloned.FuncMap)).Equal(1)
 		gt.V(t, cloned.FuncMap["key1"]).NotNil()
@@ -668,7 +668,7 @@ func TestCloneNotCloned(t *testing.T) {
 		// Create a map with mixed field types
 		type privateValueWithFunc struct {
 			id string // redactable field (preserved)
-			fn func() // non-redactable field (becomes nil)
+			fn func() // function references are copied
 		}
 		type container struct {
 			// Map with unexported value type containing mixed fields
@@ -1124,7 +1124,7 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		// Structures with non-redactable fields can still be cloned
 		type privateWithFunc struct {
 			value string
-			fn    func() // non-redactable field (becomes nil)
+			fn    func() // function references are copied
 		}
 		type container struct {
 			FuncMap map[string]*privateWithFunc
@@ -1139,7 +1139,7 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Maps CAN be cloned now (structure preserved, function field becomes nil)
+		// Maps CAN be cloned now (structure and function references are copied)
 		gt.V(t, cloned.FuncMap).NotNil()
 		gt.V(t, cloned.FuncMap["key"]).NotNil()
 		gt.V(t, cloned.FuncMap["key"].value).Equal("val") // String field preserved
