@@ -78,3 +78,20 @@ func newFieldPrefixCensor(prefix string) Censor {
 		return strings.HasPrefix(fieldName, prefix)
 	}
 }
+
+// applyCensorWithValue applies a censor function to a reflect.Value, handling both exported and unexported fields
+// It tries to extract the value safely and then applies the censor
+func applyCensorWithValue(censor Censor, fieldName string, value reflect.Value, tag string) bool {
+	// First, try the normal path if the value can be interfaced
+	if value.CanInterface() {
+		return censor(fieldName, value.Interface(), tag)
+	}
+
+	// For unexported fields, try to extract the value safely
+	if extractedValue, ok := extractValueSafely(value); ok {
+		return censor(fieldName, extractedValue, tag)
+	}
+
+	// If we can't extract the value, fall back to nil (existing behavior for field name/tag based censors)
+	return censor(fieldName, nil, tag)
+}

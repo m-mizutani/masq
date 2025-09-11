@@ -273,7 +273,7 @@ func TestCloneRedact(t *testing.T) {
 	t.Run("embedded unexported struct field redaction", func(t *testing.T) {
 		type hiddenCredentials struct {
 			username string
-			password string // Should be redacted but can't because it's in unexported struct
+			password string
 		}
 
 		type container struct {
@@ -298,9 +298,8 @@ func TestCloneRedact(t *testing.T) {
 		// Regular exported field should be redacted
 		gt.V(t, cloned.Password).Equal("[REDACTED]")
 
-		// But embedded unexported struct fields are NOT redacted
-		// even though they contain "password"
-		gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")
+		// With our enhanced implementation, embedded unexported struct fields ARE now redacted!
+		gt.V(t, cloned.hiddenCredentials.password).Equal("[REDACTED]")
 	})
 
 	t.Run("exported fields in embedded unexported struct", func(t *testing.T) {
@@ -340,7 +339,7 @@ func TestCloneNotRedact(t *testing.T) {
 		gt.V(t, c.Redact(nil)).Nil()
 	})
 
-	t.Run("unexported field not redacted", func(t *testing.T) {
+	t.Run("unexported field not redacted by non-matching filter", func(t *testing.T) {
 		c := masq.NewMasq(masq.WithContain("blue"))
 		type myStruct struct {
 			unexported string
@@ -354,6 +353,39 @@ func TestCloneNotRedact(t *testing.T) {
 		copied := gt.Cast[*myStruct](t, c.Redact(data))
 		gt.V(t, copied.unexported).Equal("red")
 		gt.V(t, copied.Exported).Equal("orange")
+	})
+
+	t.Run("unexported field IS redacted by matching content filter", func(t *testing.T) {
+		c := masq.NewMasq(masq.WithContain("red"))
+		type myStruct struct {
+			unexported string
+			Exported   string
+		}
+
+		data := &myStruct{
+			unexported: "red content",    // should be redacted
+			Exported:   "orange content", // should not be redacted
+		}
+		copied := gt.Cast[*myStruct](t, c.Redact(data))
+		gt.V(t, copied.unexported).Equal("[REDACTED]") // Now redacted!
+		gt.V(t, copied.Exported).Equal("orange content")
+	})
+
+	t.Run("unexported field redacted by type filter", func(t *testing.T) {
+		type sensitiveType string
+		c := masq.NewMasq(masq.WithType[sensitiveType]())
+		type myStruct struct {
+			unexported sensitiveType
+			Exported   string
+		}
+
+		data := &myStruct{
+			unexported: sensitiveType("sensitive data"),
+			Exported:   "public data",
+		}
+		copied := gt.Cast[*myStruct](t, c.Redact(data))
+		gt.V(t, copied.unexported).Equal(sensitiveType("[REDACTED]"))
+		gt.V(t, copied.Exported).Equal("public data")
 	})
 
 	t.Run("various fields not matching filter", func(t *testing.T) {
@@ -1370,10 +1402,10 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 		gt.V(t, cloned.PublicCredentials.Username).Equal("public-user")
 	})
 
-	t.Run("embedded unexported struct fields cannot be redacted", func(t *testing.T) {
+	t.Run("embedded unexported struct fields CAN now be redacted", func(t *testing.T) {
 		type hiddenCredentials struct {
 			username string
-			password string // Should be redacted but can't because it's in unexported struct
+			password string
 		}
 
 		type container struct {
@@ -1398,9 +1430,8 @@ func TestEmbeddedStructCloningBehavior(t *testing.T) {
 		// Regular exported field should be redacted
 		gt.V(t, cloned.Password).Equal("[REDACTED]")
 
-		// But embedded unexported struct fields are NOT redacted
-		// even though they contain "password"
-		gt.V(t, cloned.hiddenCredentials.password).Equal("hidden-password")
+		// With our enhanced implementation, embedded unexported struct fields ARE now redacted!
+		gt.V(t, cloned.hiddenCredentials.password).Equal("[REDACTED]")
 	})
 }
 

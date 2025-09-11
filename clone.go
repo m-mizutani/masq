@@ -110,16 +110,8 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 	}
 
 	for _, filter := range x.filters {
-		// Check if we can get the interface value
-		var srcInterface interface{}
-		canInterface := src.CanInterface()
-		if canInterface {
-			srcInterface = src.Interface()
-		}
-
-		// Apply filter even for unexported fields if it's based on field name or tag
-		if (canInterface && filter.censor(fieldName, srcInterface, tag)) ||
-			(!canInterface && filter.censor(fieldName, nil, tag)) {
+		// Apply filter, now supporting value-based filtering for unexported fields
+		if applyCensorWithValue(filter.censor, fieldName, src, tag) {
 			dst := reflect.New(src.Type())
 
 			if !filter.redactors.Redact(src, dst) {
@@ -155,8 +147,8 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 					tagValue := f.Tag.Get(x.tagKey)
 					shouldRedact := false
 					for _, filter := range x.filters {
-						// For unexported fields, we can only check by field name or tag
-						if filter.censor(f.Name, nil, tagValue) {
+						// Now supports value-based filtering for unexported fields
+						if applyCensorWithValue(filter.censor, f.Name, srcValue, tagValue) {
 							shouldRedact = true
 							// Field should be redacted
 							dst := reflect.New(srcValue.Type())
