@@ -615,67 +615,90 @@ func TestNilInterface(t *testing.T) {
 
 // TestCloneNotCloned tests cases where values cannot be cloned due to security or limitations
 func TestCloneNotCloned(t *testing.T) {
-	t.Run("maps with unexported types return nil", func(t *testing.T) {
-		// This test demonstrates the security improvement: unexported maps return zero values
+	t.Run("maps with unexported types containing non-redactable fields CAN be cloned", func(t *testing.T) {
+		// Structures with non-redactable fields can still be cloned
+		// The non-redactable fields become nil/zero values
+		type privateFunc struct {
+			fn func() string // function types cannot be redacted (becomes nil)
+		}
+		type container struct {
+			// Map with unexported types containing non-redactable fields
+			FuncMap map[string]*privateFunc
+		}
+		
+		original := &container{
+			FuncMap: map[string]*privateFunc{
+				"key1": {fn: func() string { return "value1" }},
+			},
+		}
+
+		mask := masq.NewMasq()
+		cloned := gt.Cast[*container](t, mask.Redact(original))
+
+		// Map CAN be cloned now (structure is cloned, but fn field becomes nil)
+		gt.V(t, cloned.FuncMap).NotNil()
+		gt.V(t, len(cloned.FuncMap)).Equal(1)
+		gt.V(t, cloned.FuncMap["key1"]).NotNil()
+		gt.V(t, cloned.FuncMap["key1"].fn).NotNil() // Function field is copied consistently
+	})
+
+	t.Run("maps with redactable unexported types CAN be cloned", func(t *testing.T) {
+		// This test verifies that maps with redactable unexported types can now be cloned
 		original := NewMapContainer()
 
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
 
 		// Both UserMap (map[string]*privateUser) and DataMap (map[string]privateData)
-		// should be nil (zero value) for security reasons to prevent information leaks
+		// CAN now be cloned because privateUser and privateData have redactable string fields
 
-		// Check UserMap - maps with unexported types become nil
-		gt.V(t, cloned.UserMap).Nil()
+		// Check UserMap - maps with redactable unexported types CAN be cloned
+		gt.V(t, cloned.UserMap).NotNil()
+		gt.V(t, len(cloned.UserMap)).Equal(2)
 
-		// Check DataMap - maps with unexported types become nil
-		gt.V(t, cloned.DataMap).Nil()
+		// Check DataMap - maps with redactable unexported types CAN be cloned
+		gt.V(t, cloned.DataMap).NotNil()
+		gt.V(t, len(cloned.DataMap)).Equal(2)
 	})
 
-	t.Run("unexported maps become nil regardless of filtering", func(t *testing.T) {
-		original := NewMapContainer()
+	t.Run("maps with structures containing mixed redactable/non-redactable fields", func(t *testing.T) {
+		// Structures with mixed fields can be cloned
+		// Redactable fields are preserved, non-redactable fields become nil/zero
 
-		// Create mask that redacts "password" field
-		mask := masq.NewMasq(masq.WithFieldName("password"))
-		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
-
-		// For security, maps with unexported types become nil regardless of filtering
-		// This prevents any potential information leakage
-		gt.V(t, cloned.UserMap).Nil()
-		gt.V(t, cloned.DataMap).Nil()
-	})
-
-	t.Run("maps with un-interfaceable keys or values return zero", func(t *testing.T) {
-		// This test verifies that maps containing un-interfaceable keys or values
-		// return zero values to prevent information leakage (security improvement)
-
-		// Create a map through reflection that may have un-interfaceable entries
-		type privateKey struct {
-			id string
+		// Create a map with mixed field types
+		type privateValueWithFunc struct {
+			id string  // redactable field (preserved)
+			fn func()  // non-redactable field (becomes nil)
 		}
 		type container struct {
-			// Map with unexported key type
-			M1 map[privateKey]string
-			// Map that might contain un-interfaceable values
+			// Map with unexported value type containing mixed fields
+			M1 map[string]*privateValueWithFunc
+			// Map that can be cloned for comparison
 			M2 map[string]interface{}
 		}
 
 		original := &container{
-			M1: map[privateKey]string{
-				{id: "key1"}: "value1",
-				{id: "key2"}: "value2",
+			M1: map[string]*privateValueWithFunc{
+				"key1": {id: "val1", fn: func() {}},
+				"key2": {id: "val2", fn: func() {}},
 			},
 			M2: make(map[string]interface{}),
 		}
 
-		// Add some values that might not be interfaceable
+		// Add some values
 		original.M2["normal"] = "value"
 
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Maps with unexported key types should be nil (zero value) for security
-		gt.V(t, cloned.M1).Nil()
+		// Maps CAN be cloned (structure preserved, function fields become nil)
+		gt.V(t, cloned.M1).NotNil()
+		gt.V(t, len(cloned.M1)).Equal(2)
+		
+		// Check that id fields are preserved but fn fields become nil
+		gt.V(t, cloned.M1["key1"]).NotNil()
+		gt.V(t, cloned.M1["key1"].id).Equal("val1")  // String field preserved
+		gt.V(t, cloned.M1["key1"].fn).NotNil()        // Function field is copied consistently
 
 		// M2 should be cloned since it has exported types
 		gt.V(t, fmt.Sprintf("%p", cloned.M2)).NotEqual(fmt.Sprintf("%p", original.M2))
@@ -977,23 +1000,16 @@ func TestCloneComplexUnexportedTypes(t *testing.T) {
 	gt.V(t, copied.Array[0].value).Equal("arr1")
 	gt.V(t, copied.Array[0].num).Equal(111)
 
-	// Maps with unexported types return zero values for security
-	if len(copied.Map) == 0 {
-		t.Log("Map with unexported types returned nil/empty for security - this is expected")
-	} else {
-		gt.V(t, len(copied.Map)).Equal(2)
-		gt.V(t, copied.Map["key1"].value).Equal("map1")
-		gt.V(t, copied.Map["key1"].num).Equal(100)
-	}
+	// Maps with redactable unexported types CAN now be cloned
+	// unexportedType has string and int fields which are redactable
+	gt.V(t, len(copied.Map)).Equal(2)
+	gt.V(t, copied.Map["key1"].value).Equal("map1")
+	gt.V(t, copied.Map["key1"].num).Equal(100)
 
-	// Maps with unexported pointer types also return zero values for security
-	if len(copied.MapPtr) == 0 {
-		t.Log("Map with unexported pointer types returned nil/empty for security - this is expected")
-	} else {
-		gt.V(t, len(copied.MapPtr)).Equal(2)
-		gt.V(t, copied.MapPtr["ptr1"].value).Equal("mapptr1")
-		gt.V(t, copied.MapPtr["ptr1"].num).Equal(1000)
-	}
+	// Maps with redactable unexported pointer types CAN also be cloned
+	gt.V(t, len(copied.MapPtr)).Equal(2)
+	gt.V(t, copied.MapPtr["ptr1"].value).Equal("mapptr1")
+	gt.V(t, copied.MapPtr["ptr1"].num).Equal(1000)
 
 	// Interface should be properly copied since it's exported
 	if copied.Interface != nil {
@@ -1061,72 +1077,51 @@ func TestMapWithStructValues(t *testing.T) {
 }
 
 func TestMapWithUnexportedTypes(t *testing.T) {
-	t.Run("maps with unexported types return zero values for security", func(t *testing.T) {
-		// This test demonstrates the security improvement: unexported maps return zero values
+	t.Run("maps with redactable unexported types CAN be cloned", func(t *testing.T) {
+		// This test demonstrates that maps with redactable unexported types can now be cloned
 		original := NewMapContainer()
 
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
 
 		// Both UserMap (map[string]*privateUser) and DataMap (map[string]privateData)
-		// should be nil (zero value) for security reasons to prevent information leaks
+		// CAN now be cloned because they contain redactable fields (strings)
 
-		// Check UserMap - maps with unexported types become nil
-		gt.V(t, cloned.UserMap).Nil()
+		// Check UserMap - maps with redactable unexported types CAN be cloned
+		gt.V(t, cloned.UserMap).NotNil()
+		gt.V(t, len(cloned.UserMap)).Equal(2)
 
-		// Check DataMap - maps with unexported types become nil
-		gt.V(t, cloned.DataMap).Nil()
+		// Check DataMap - maps with redactable unexported types CAN be cloned
+		gt.V(t, cloned.DataMap).NotNil()
+		gt.V(t, len(cloned.DataMap)).Equal(2)
 	})
 
-	t.Run("unexported maps become nil regardless of filtering options", func(t *testing.T) {
-		original := NewMapContainer()
-
-		// Create mask that redacts "password" field
-		mask := masq.NewMasq(masq.WithFieldName("password"))
-		cloned := gt.Cast[*MapContainer](t, mask.Redact(original))
-
-		// For security, maps with unexported types become nil regardless of filtering
-		// This prevents any potential information leakage
-		gt.V(t, cloned.UserMap).Nil()
-		gt.V(t, cloned.DataMap).Nil()
-	})
-
-	t.Run("maps with un-interfaceable keys or values return zero values for security", func(t *testing.T) {
-		// This test verifies that maps containing un-interfaceable keys or values
-		// return zero values to prevent information leakage (security improvement)
-
-		// Create a map through reflection that may have un-interfaceable entries
-		type privateKey struct {
-			id string
+	t.Run("maps with unexported types containing mixed fields CAN be cloned", func(t *testing.T) {
+		// Structures with non-redactable fields can still be cloned
+		type privateWithFunc struct {
+			value string
+			fn    func() // non-redactable field (becomes nil)
 		}
 		type container struct {
-			// Map with unexported key type
-			M1 map[privateKey]string
-			// Map that might contain un-interfaceable values
-			M2 map[string]interface{}
+			FuncMap map[string]*privateWithFunc
 		}
-
+		
 		original := &container{
-			M1: map[privateKey]string{
-				{id: "key1"}: "value1",
-				{id: "key2"}: "value2",
+			FuncMap: map[string]*privateWithFunc{
+				"key": {value: "val", fn: func() {}},
 			},
-			M2: make(map[string]interface{}),
 		}
-
-		// Add some values that might not be interfaceable
-		original.M2["normal"] = "value"
 
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Maps with unexported key types should be nil (zero value) for security
-		gt.V(t, cloned.M1).Nil()
-
-		// M2 should be cloned since it has exported types
-		gt.V(t, fmt.Sprintf("%p", cloned.M2)).NotEqual(fmt.Sprintf("%p", original.M2))
-		gt.V(t, cloned.M2["normal"]).Equal("value")
+		// Maps CAN be cloned now (structure preserved, function field becomes nil)
+		gt.V(t, cloned.FuncMap).NotNil()
+		gt.V(t, cloned.FuncMap["key"]).NotNil()
+		gt.V(t, cloned.FuncMap["key"].value).Equal("val")  // String field preserved
+		gt.V(t, cloned.FuncMap["key"].fn).NotNil()         // Function field is copied consistently
 	})
+
 
 	t.Run("maps in unexported fields return zero values for security", func(t *testing.T) {
 		// This test verifies that maps within unexported struct fields
@@ -1342,8 +1337,9 @@ func TestMapWithUnexportedTypes(t *testing.T) {
 		mask := masq.NewMasq()
 		cloned := gt.Cast[*container](t, mask.Redact(original))
 
-		// Security: Map with unexported key type returns zero value
-		gt.V(t, cloned.Data).Equal(map[complexKey]string(nil))
+		// Map with redactable unexported key type can now be cloned
+		gt.V(t, cloned.Data).NotEqual(map[complexKey]string(nil))
+		gt.V(t, len(cloned.Data)).Equal(3)  // Should have same number of entries
 	})
 }
 

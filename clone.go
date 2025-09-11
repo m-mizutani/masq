@@ -263,6 +263,9 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 							unsafeCopyValue(dstValue, copied)
 						}
 						continue
+					case reflect.Func, reflect.Chan:
+						// Functions and channels are reference types, copy them normally
+						safeCopyValue(dstValue, srcValue)
 					default:
 						// For unsupported types, use safe copy to avoid panics with unexported fields
 						safeCopyValue(dstValue, srcValue)
@@ -303,9 +306,12 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		valueType := mapType.Elem()
 		isUnexportedValueType := isUnexported(valueType)
 
-		// Security: If map has unexported key or value type, return zero value
-		// This prevents potential information leakage at the cost of losing the map content
-		if isUnexportedKeyType || isUnexportedValueType {
+		// Security: Check if unexported types can be redacted
+		// If they cannot be redacted, return zero value to prevent information leakage
+		if isUnexportedKeyType && !canRedactType(keyType) {
+			return reflect.Zero(src.Type())
+		}
+		if isUnexportedValueType && !canRedactType(valueType) {
 			return reflect.Zero(src.Type())
 		}
 
@@ -438,4 +444,109 @@ func isUnexported(t reflect.Type) bool {
 	name := t.Name()
 	// For named types, an unexported name starts with a lowercase letter.
 	return name != "" && unicode.IsLower(rune(name[0]))
+}
+
+// canRedactType checks if a type can be safely cloned.
+// This includes basic types that extractValueSafely can handle and
+// struct types (which can always be cloned, with non-redactable fields becoming nil/zero).
+func canRedactType(t reflect.Type) bool {
+	// For pointer types, check the element type first
+	if t.Kind() == reflect.Pointer {
+		return canRedactType(t.Elem())
+	}
+
+	// Built-in types (non-pointer types with empty PkgPath) are always redactable
+	if t.PkgPath() == "" && t.Kind() != reflect.Pointer {
+		return true
+	}
+
+	// For struct types, always allow cloning
+	// Individual fields that cannot be redacted will become nil/zero values
+	if t.Kind() == reflect.Struct {
+		return true
+	}
+
+	// For slice and array types, check element type
+	if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+		return canRedactType(t.Elem())
+	}
+
+	// For map types, check both key and value types
+	if t.Kind() == reflect.Map {
+		return canRedactType(t.Key()) && canRedactType(t.Elem())
+	}
+
+	// Check if this is a basic type that extractValueSafely can handle
+	switch t.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128:
+		return true
+	case reflect.Interface:
+		// Interfaces can potentially hold redactable values
+		return true
+	case reflect.Chan, reflect.Func:
+		// Functions and channels can be redacted (replaced with safe values)
+		return true
+	case reflect.UnsafePointer:
+		// Unsafe pointers cannot be safely redacted
+		return false
+	default:
+		// Unknown types are considered non-redactable for safety
+		return false
+	}
+}
+
+// canRedactStruct checks if a struct type can be safely redacted.
+// A struct is considered redactable only if ALL its fields are redactable.
+// If any field contains non-redactable types (functions, channels, etc.),
+// the entire struct is considered non-redactable for security.
+func canRedactStruct(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+
+	// Check each field - ALL must be redactable
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !isFieldRedactable(field) {
+			// If any field is not redactable, the struct cannot be safely redacted
+			return false
+		}
+	}
+
+	// All fields are redactable
+	return true
+}
+
+// isFieldRedactable checks if a struct field can be redacted.
+// Fields with basic types that extractValueSafely can handle are considered redactable.
+// Even exported fields with non-redactable types (functions, channels) are not redactable.
+func isFieldRedactable(field reflect.StructField) bool {
+	// Check if the field type is a basic type that extractValueSafely can handle
+	switch field.Type.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128:
+		return true
+	case reflect.Ptr:
+		// Check if the pointer points to a redactable type
+		return canRedactType(field.Type.Elem())
+	case reflect.Struct:
+		// Recursively check nested structs
+		return canRedactStruct(field.Type)
+	case reflect.Slice, reflect.Array:
+		// Check element type
+		return canRedactType(field.Type.Elem())
+	case reflect.Map:
+		// Check both key and value types
+		return canRedactType(field.Type.Key()) && canRedactType(field.Type.Elem())
+	default:
+		// Functions, channels, etc. are not redactable
+		return false
+	}
 }
