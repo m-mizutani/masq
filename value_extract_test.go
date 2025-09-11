@@ -136,12 +136,12 @@ func TestPrivateFieldRedaction(t *testing.T) {
 		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
 
 		// Fields matching any filter should be redacted
-		gt.V(t, result.ExportedString).Equal("[REDACTED]")    // tag:secret
-		gt.V(t, result.privateString).Equal("[REDACTED]")     // tag:secret
-		gt.V(t, result.privateSensitive).Equal("[REDACTED]")  // contains:secret
-		gt.V(t, result.privateWithToken).Equal("[REDACTED]")  // contains:token
-		gt.V(t, result.privateInt).Equal(0)                   // tag:secret
-		gt.V(t, result.privateBool).Equal(false)              // tag:secret
+		gt.V(t, result.ExportedString).Equal("[REDACTED]")   // tag:secret
+		gt.V(t, result.privateString).Equal("[REDACTED]")    // tag:secret
+		gt.V(t, result.privateSensitive).Equal("[REDACTED]") // contains:secret
+		gt.V(t, result.privateWithToken).Equal("[REDACTED]") // contains:token
+		gt.V(t, result.privateInt).Equal(0)                  // tag:secret
+		gt.V(t, result.privateBool).Equal(false)             // tag:secret
 		// Fields not matching any filter should remain unchanged
 		gt.V(t, result.privateFloat64).Equal(3.14)
 	})
@@ -187,18 +187,18 @@ func TestPrivateFieldRedaction(t *testing.T) {
 	t.Run("Verify private field access works correctly", func(t *testing.T) {
 		// Test that shows private fields can actually be accessed and redacted
 		// This would fail without our unsafe value extraction implementation
-		
+
 		m := masq.NewMasq(masq.WithFieldPrefix("private"))
 		original := testData
 		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(original))
-		
+
 		// Verify that private fields were actually accessed and modified
 		// If unsafe extraction didn't work, these would remain unchanged
 		gt.V(t, result.privateString).NotEqual(original.privateString)
 		gt.V(t, result.privateInt).NotEqual(original.privateInt)
 		gt.V(t, result.privateBool).NotEqual(original.privateBool)
 		gt.V(t, result.privateFloat64).NotEqual(original.privateFloat64)
-		
+
 		// Verify specific redacted values
 		gt.V(t, result.privateString).Equal("[REDACTED]")
 		gt.V(t, result.privateInt).Equal(0)
