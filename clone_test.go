@@ -891,6 +891,30 @@ func TestCloneFunc(t *testing.T) {
 	gt.Equal(t, dst(), "blue")
 }
 
+func TestCloneReflectType(t *testing.T) {
+	// This test verifies that reflect.Type fields don't cause panics
+	// because they're handled by ignoreTypes["*reflect.rtype"]
+	type structWithReflectType struct {
+		Name     string       `masq:"secret"`
+		TypeInfo reflect.Type // This contains *reflect.rtype internally
+	}
+
+	original := structWithReflectType{
+		Name:     "test_struct",
+		TypeInfo: reflect.TypeOf("string"),
+	}
+
+	// This should not panic due to ignoreTypes handling
+	m := masq.NewMasq(masq.WithTag("secret"))
+	cloned := m.Redact(original).(structWithReflectType)
+
+	// Name should be redacted
+	gt.V(t, cloned.Name).Equal("[REDACTED]")
+	// TypeInfo should be preserved (not copied, but same reference due to ignoreTypes)
+	gt.V(t, cloned.TypeInfo).Equal(original.TypeInfo)
+	gt.V(t, cloned.TypeInfo.String()).Equal("string")
+}
+
 func TestUnmarshalTypeError(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{
