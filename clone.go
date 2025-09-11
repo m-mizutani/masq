@@ -263,6 +263,9 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 							unsafeCopyValue(dstValue, copied)
 						}
 						continue
+					case reflect.Func, reflect.Chan:
+						// Functions and channels are reference types, copy them normally
+						safeCopyValue(dstValue, srcValue)
 					default:
 						// For unsupported types, use safe copy to avoid panics with unexported fields
 						safeCopyValue(dstValue, srcValue)
@@ -303,9 +306,12 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 		valueType := mapType.Elem()
 		isUnexportedValueType := isUnexported(valueType)
 
-		// Security: If map has unexported key or value type, return zero value
-		// This prevents potential information leakage at the cost of losing the map content
-		if isUnexportedKeyType || isUnexportedValueType {
+		// Security: Check if unexported types can be redacted
+		// If they cannot be redacted, return zero value to prevent information leakage
+		if isUnexportedKeyType && !canRedactType(keyType) {
+			return reflect.Zero(src.Type())
+		}
+		if isUnexportedValueType && !canRedactType(valueType) {
 			return reflect.Zero(src.Type())
 		}
 
@@ -439,3 +445,53 @@ func isUnexported(t reflect.Type) bool {
 	// For named types, an unexported name starts with a lowercase letter.
 	return name != "" && unicode.IsLower(rune(name[0]))
 }
+
+// canRedactType checks if a type can be safely cloned.
+// This includes basic types that extractValueSafely can handle and
+// struct types (which can always be cloned, with fields that cannot be redacted becoming nil/zero).
+func canRedactType(t reflect.Type) bool {
+	// For pointer types, check the element type first
+	if t.Kind() == reflect.Pointer {
+		return canRedactType(t.Elem())
+	}
+
+
+	// For struct types, always allow cloning
+	// Individual fields that cannot be redacted will become nil/zero values
+	if t.Kind() == reflect.Struct {
+		return true
+	}
+
+	// For slice and array types, check element type
+	if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+		return canRedactType(t.Elem())
+	}
+
+	// For map types, check both key and value types
+	if t.Kind() == reflect.Map {
+		return canRedactType(t.Key()) && canRedactType(t.Elem())
+	}
+
+	// Check if this is a basic type that extractValueSafely can handle
+	switch t.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64,
+		reflect.Complex64, reflect.Complex128:
+		return true
+	case reflect.Interface:
+		// Interfaces can potentially hold values that can be redacted
+		return true
+	case reflect.Chan, reflect.Func:
+		// Functions and channels can be redacted (replaced with safe values)
+		return true
+	case reflect.UnsafePointer:
+		// Unsafe pointers cannot be safely redacted
+		return false
+	default:
+		// Unknown types cannot be redacted for safety
+		return false
+	}
+}
+

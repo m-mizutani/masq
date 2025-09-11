@@ -504,10 +504,10 @@ func TestClone(t *testing.T) {
 	})
 
 	t.Run("MapsWithUnexportedTypes", func(t *testing.T) {
-		// Maps with unexported types are zeroed for security
-		gt.V(t, len(cloned.MapUnexportedKey)).Equal(0)
-		gt.V(t, len(cloned.MapUnexportedValue)).Equal(0)
-		gt.V(t, len(cloned.MapUnexportedBoth)).Equal(0)
+		// Maps with redactable unexported types can now be cloned
+		gt.V(t, len(cloned.MapUnexportedKey)).Equal(1)
+		gt.V(t, len(cloned.MapUnexportedValue)).Equal(1)
+		gt.V(t, len(cloned.MapUnexportedBoth)).Equal(1)
 
 		// Maps with exported types should be cloned normally
 		gt.V(t, cloned.MapExportedKey).Equal(original.MapExportedKey)
@@ -613,6 +613,8 @@ var fieldGroups = struct {
 	unexportedRedactionHardToDetect []string
 	// Fields that become nil/zero for security reasons
 	securityNilFields []string
+	// Maps with unexported types that can now be cloned
+	mapsWithUnexportedTypes []string
 }{
 	unexportedWithSecretTag: []string{
 		// Direct definition unexported fields
@@ -620,6 +622,7 @@ var fieldGroups = struct {
 		"unexportedBool", "unexportedByte", "unexportedRune",
 		"unexportedCustomString", "unexportedCustomInt", "unexportedCustomBool", "unexportedCustomStruct",
 		"unexportedPointer", "unexportedSlice", "unexportedArray",
+		"unexportedFunc", "unexportedChan", // Functions and channels with masq:"secret" tag
 		"unexportedStringer", "unexportedStruct", "unexportedNestedPtr", "unexportedSliceStruct",
 		"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
 		"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
@@ -641,7 +644,7 @@ var fieldGroups = struct {
 		"password": {"unexportedContainsPassword"},
 	},
 	unexportedNonRedactable: []string{
-		"unexportedFunc", "unexportedChan",
+		// Currently no fields are non-redactable - func/chan can now be redacted
 	},
 	unexportedRedactionHardToDetect: []string{
 		"unexportedBool", "unexportedByte", "unexportedCustomBool",
@@ -652,6 +655,9 @@ var fieldGroups = struct {
 	securityNilFields: []string{
 		"unexportedMap", "unexportedInterface", "unexportedMapStruct",
 	},
+	mapsWithUnexportedTypes: []string{
+		"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
+	},
 }
 
 // Legacy field list - to be removed after migration
@@ -659,6 +665,7 @@ var unexportedFields = func() []string {
 	var all []string
 	all = append(all, fieldGroups.unexportedWithSecretTag...)
 	all = append(all, fieldGroups.unexportedNonRedactable...)
+	all = append(all, fieldGroups.mapsWithUnexportedTypes...)
 	return all
 }()
 
@@ -679,6 +686,8 @@ func TestRedact(t *testing.T) {
 					"ExportedStruct", "ExportedSliceStruct", "ExportedMapStruct",
 					// Maps with exported types with "secret" tag
 					"MapExportedKey", "MapExportedValue", "MapExportedBoth",
+					// Maps with unexported types can now be redacted since they're cloneable
+					"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
 					// Interface fields with "secret" tag
 					"InterfaceString", "InterfaceStruct", "InterfaceUnexported",
 					// Prefix fields with "secret" tag
@@ -696,6 +705,8 @@ func TestRedact(t *testing.T) {
 					"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
 					"unexportedRune", "unexportedCustomString", "unexportedCustomInt",
 					"unexportedSlice", "unexportedSliceStruct",
+					// Functions and channels can now be redacted
+					"unexportedFunc", "unexportedChan",
 					// Content fields
 					"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
 					"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
@@ -716,12 +727,11 @@ func TestRedact(t *testing.T) {
 					"TaggedPassword", "TaggedToken", "UntaggedField",
 				}
 				// Add fields that can't be redacted or detection is difficult
-				return append(append(base, fieldGroups.unexportedNonRedactable...), fieldGroups.unexportedRedactionHardToDetect...)
+				result := append(append(base, fieldGroups.unexportedNonRedactable...), fieldGroups.unexportedRedactionHardToDetect...)
+				// Note: mapsWithUnexportedTypes are not added here because they have masq:"secret" tags and should be redacted
+				return result
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		// WithFieldName tests - comprehensive field name filtering including unexported fields
 		{
@@ -746,11 +756,10 @@ func TestRedact(t *testing.T) {
 				"RegexPhone", "RegexEmail", "RegexNormal",
 				// Add embedded fields to appropriate tests
 				"ExportedEmbeddedField", "unexportedEmbeddedField", "Deep",
-			}, unexportedFields...),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
+				// Maps with unexported types (can be cloned but not redacted by this filter)
 				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			}, unexportedFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithFieldName_unexportedString",
@@ -784,10 +793,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(exported, notRedacted...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithFieldName_ExportedEmbeddedField",
@@ -814,9 +820,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(allOthers, unexportedFields...)
 			}(),
-			notCloned: append([]string{
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithFieldName_unexportedEmbeddedField",
@@ -849,9 +853,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(allOthers, filteredUnexported...)
 			}(),
-			notCloned: append([]string{
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:     "WithFieldName_nonexistent",
@@ -875,10 +877,7 @@ func TestRedact(t *testing.T) {
 				"RegexPhone", "RegexEmail", "RegexNormal",
 				"ExportedEmbeddedField", // Embedded field from EmbeddedExported
 			}, unexportedFields...),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		// WithFieldPrefix tests - comprehensive field prefix filtering including unexported fields
 		{
@@ -902,10 +901,7 @@ func TestRedact(t *testing.T) {
 				"RegexPhone", "RegexEmail", "RegexNormal",
 				"ExportedEmbeddedField", // Embedded field from EmbeddedExported
 			}, unexportedFields...),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithFieldPrefix_unexported",
@@ -915,6 +911,8 @@ func TestRedact(t *testing.T) {
 				"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
 				"unexportedRune", "unexportedCustomString", "unexportedCustomInt",
 				"unexportedSlice", "unexportedSliceStruct",
+				// Functions and channels with "unexported" prefix
+				"unexportedFunc", "unexportedChan",
 				// Content fields starting with "unexported"
 				"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
 				"unexportedRegexPhone", "unexportedRegexEmail", "unexportedRegexNormal",
@@ -942,12 +940,10 @@ func TestRedact(t *testing.T) {
 					"ExportedEmbeddedField", "Deep",
 				}
 				// Add fields that can't be redacted or detection is difficult
-				return append(append(base, fieldGroups.unexportedNonRedactable...), fieldGroups.unexportedRedactionHardToDetect...)
+				result := append(append(base, fieldGroups.unexportedNonRedactable...), fieldGroups.unexportedRedactionHardToDetect...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithFieldPrefix_Exported",
@@ -972,10 +968,7 @@ func TestRedact(t *testing.T) {
 				"RegexPhone", "RegexEmail", "RegexNormal",
 				"Deep", // Deep embedded field doesn't start with "Exported"
 			}, unexportedFields...),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		// WithType tests - comprehensive type filtering including custom and complex types
 		{
@@ -1027,12 +1020,10 @@ func TestRedact(t *testing.T) {
 						nonStringUnexported = append(nonStringUnexported, field)
 					}
 				}
-				return append(append(base, nonStringUnexported...), fieldGroups.unexportedNonRedactable...)
+				result := append(append(base, nonStringUnexported...), fieldGroups.unexportedNonRedactable...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithType_int",
@@ -1075,12 +1066,10 @@ func TestRedact(t *testing.T) {
 						nonIntUnexported = append(nonIntUnexported, field)
 					}
 				}
-				return append(append(base, nonIntUnexported...), fieldGroups.unexportedNonRedactable...)
+				result := append(append(base, nonIntUnexported...), fieldGroups.unexportedNonRedactable...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithType_CustomType",
@@ -1104,12 +1093,10 @@ func TestRedact(t *testing.T) {
 					"RegexPhone", "RegexEmail", "RegexNormal",
 					"ExportedEmbeddedField", // string type from embedded struct
 				}
-				return append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+				result := append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithType_CustomInt",
@@ -1133,12 +1120,10 @@ func TestRedact(t *testing.T) {
 					"RegexPhone", "RegexEmail", "RegexNormal",
 					"ExportedEmbeddedField", // string type from embedded struct
 				}
-				return append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+				result := append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithType_CustomStruct",
@@ -1162,12 +1147,10 @@ func TestRedact(t *testing.T) {
 					"RegexPhone", "RegexEmail", "RegexNormal",
 					"ExportedEmbeddedField", // string type from embedded struct
 				}
-				return append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+				result := append(append(base, fieldGroups.unexportedWithSecretTag...), fieldGroups.unexportedNonRedactable...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithType_SliceString",
@@ -1198,12 +1181,10 @@ func TestRedact(t *testing.T) {
 						nonSliceUnexported = append(nonSliceUnexported, field)
 					}
 				}
-				return append(append(base, nonSliceUnexported...), fieldGroups.unexportedNonRedactable...)
+				result := append(append(base, nonSliceUnexported...), fieldGroups.unexportedNonRedactable...)
+				return append(result, fieldGroups.mapsWithUnexportedTypes...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		// WithContain tests - comprehensive content filtering including unexported fields
 		{
@@ -1248,10 +1229,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(base, nonSecretUnexported...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithContain_password",
@@ -1295,10 +1273,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(base, nonPasswordUnexported...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		// WithRegex tests - comprehensive regex filtering including unexported fields
 		{
@@ -1332,10 +1307,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(base, nonPhoneUnexported...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 		{
 			name:   "WithRegex_email",
@@ -1368,10 +1340,7 @@ func TestRedact(t *testing.T) {
 				}
 				return append(base, nonEmailUnexported...)
 			}(),
-			notCloned: append([]string{
-				// Maps with unexported types (always nil/zero for security)
-				"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
-			}, fieldGroups.securityNilFields...),
+			notCloned: fieldGroups.securityNilFields,
 		},
 	}
 
@@ -1525,12 +1494,13 @@ func TestComplexTypePatterns(t *testing.T) {
 		m := masq.NewMasq()
 		result := gt.Cast[ComplexTestStruct](t, m.Redact(testData))
 
-		// Maps with unexported keys should be zeroed for security
-		gt.V(t, len(result.MapUnexportedKey)).Equal(0)
-		gt.V(t, len(result.MapUnexportedBoth)).Equal(0)
+		// Maps with redactable unexported types CAN now be cloned
+		// unexportedKeyType and unexportedValueType are string-based, so they're redactable
+		gt.V(t, len(result.MapUnexportedKey)).Equal(2)   // Can be cloned now (2 elements in test data)
+		gt.V(t, len(result.MapUnexportedValue)).Equal(2) // Can be cloned now (2 elements in test data)
 
-		// Map with exported key but unexported value should also be zeroed
-		gt.V(t, len(result.MapUnexportedValue)).Equal(0)
+		// Both key and value are redactable unexported types
+		gt.V(t, len(result.MapUnexportedBoth)).Equal(2) // Can be cloned now (2 elements in test data)
 
 		// Map with exported types should be preserved
 		gt.V(t, result.MapExportedBoth).Equal(testData.MapExportedBoth)

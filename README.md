@@ -253,19 +253,10 @@ out.Flush()
 Some data cannot be cloned and will become `nil` or zero values:
 
 ```go
-type privateType struct { value string }
 type privateMapType map[string]string
 
 type Example struct {
     // ❌ Cannot be cloned - these become nil/zero values
-    
-    // Maps using private types
-    BadMap1      map[privateType]string
-    BadMap2      map[string]privateType
-    BadMap3      map[string]*privateType
-
-    // Maps in private fields 
-    privateMap   map[string]string
 
     // Private interface fields
     privateInterface interface{}
@@ -275,17 +266,7 @@ type Example struct {
 }
 ```
 
-**Result**: These fields become `nil` or zero values in the output. Since they're not cloned, they cannot be redacted.
-
-### What works
-
-Everything that can be cloned can also be redacted. All redaction filters work on:
-
-- **All struct fields** (public and private)
-- **Slices and arrays** 
-- **Maps with public types** (`map[string]string`, `map[PublicType]*AnyType`)
-- **Public interface fields**
-- **Embedded structs**
+**Result**: These fields become `nil` or zero values in the output for security reasons (e.g., interfaces in private fields). Note that maps with unexported key or value types can now be cloned, provided the types themselves are composed of fields that can be redacted.
 
 ### Recommendations
 
