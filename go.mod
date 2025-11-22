@@ -1,6 +1,6 @@
 module github.com/m-mizutani/masq
 
-go 1.24.0
+go 1.24
 
 require github.com/m-mizutani/gt v0.1.0
 
