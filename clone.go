@@ -78,6 +78,25 @@ func safeCopyValue(dst, src reflect.Value) bool {
 	return false
 }
 
+// tryRedactField attempts to redact a field if it matches any filters.
+// Returns true if the field was redacted, false otherwise.
+// This function works for both exported and unexported fields.
+func (x *masq) tryRedactField(fieldName string, srcValue, dstValue reflect.Value, tagValue string) bool {
+	for _, filter := range x.filters {
+		if applyCensorWithValue(filter.censor, fieldName, srcValue, tagValue) {
+			// Field should be redacted
+			dst := reflect.New(srcValue.Type())
+			if !filter.redactors.Redact(srcValue, dst) {
+				_ = x.defaultRedactor(srcValue, dst)
+			}
+			// Copy the redacted value safely
+			safeCopyValue(dstValue, dst.Elem())
+			return true
+		}
+	}
+	return false
+}
+
 func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
 	// Make the value addressable if it's not already
 	// This is crucial for properly handling embedded unexported structs
@@ -145,23 +164,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				if srcValue.CanAddr() {
 					// First check if this field should be filtered
 					tagValue := f.Tag.Get(x.tagKey)
-					shouldRedact := false
-					for _, filter := range x.filters {
-						// Now supports value-based filtering for unexported fields
-						if applyCensorWithValue(filter.censor, f.Name, srcValue, tagValue) {
-							shouldRedact = true
-							// Field should be redacted
-							dst := reflect.New(srcValue.Type())
-							if !filter.redactors.Redact(srcValue, dst) {
-								_ = x.defaultRedactor(srcValue, dst)
-							}
-							// Copy the redacted value safely
-							safeCopyValue(dstValue, dst.Elem())
-							break
-						}
-					}
-
-					if shouldRedact {
+					if x.tryRedactField(f.Name, srcValue, dstValue, tagValue) {
 						continue
 					}
 
@@ -261,20 +264,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 						tagValue := f.Tag.Get(x.tagKey)
 
 						// Check if this field should be redacted
-						shouldRedact := false
-						for _, filter := range x.filters {
-							if applyCensorWithValue(filter.censor, f.Name, srcValue, tagValue) {
-								shouldRedact = true
-								dst := reflect.New(srcValue.Type())
-								if !filter.redactors.Redact(srcValue, dst) {
-									_ = x.defaultRedactor(srcValue, dst)
-								}
-								safeCopyValue(dstValue, dst.Elem())
-								break
-							}
-						}
-
-						if shouldRedact {
+						if x.tryRedactField(f.Name, srcValue, dstValue, tagValue) {
 							continue
 						}
 
