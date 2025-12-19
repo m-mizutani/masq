@@ -258,15 +258,14 @@ type privateMapType map[string]string
 type Example struct {
     // ❌ Cannot be cloned - these become nil/zero values
 
-    // Private interface fields
-    privateInterface interface{}
-
     // Embedded private map types
     privateMapType
 }
 ```
 
-**Result**: These fields become `nil` or zero values in the output for security reasons (e.g., interfaces in private fields). Note that maps with unexported key or value types can now be cloned, provided the types themselves are composed of fields that can be redacted.
+**Result**: These fields become `nil` or zero values in the output for security reasons. Note that:
+- Maps with unexported key or value types can now be cloned, provided the types themselves are composed of fields that can be redacted
+- Private interface fields (including `error` types) are now properly preserved and can be redacted (fixed in v0.2.1+)
 
 ### Recommendations
 

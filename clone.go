@@ -78,6 +78,25 @@ func safeCopyValue(dst, src reflect.Value) bool {
 	return false
 }
 
+// tryRedactField attempts to redact a field if it matches any filters.
+// Returns true if the field was redacted, false otherwise.
+// This function works for both exported and unexported fields.
+func (x *masq) tryRedactField(fieldName string, srcValue, dstValue reflect.Value, tagValue string) bool {
+	for _, filter := range x.filters {
+		if applyCensorWithValue(filter.censor, fieldName, srcValue, tagValue) {
+			// Field should be redacted
+			dst := reflect.New(srcValue.Type())
+			if !filter.redactors.Redact(srcValue, dst) {
+				_ = x.defaultRedactor(srcValue, dst)
+			}
+			// Copy the redacted value safely
+			safeCopyValue(dstValue, dst.Elem())
+			return true
+		}
+	}
+	return false
+}
+
 func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, tag string) reflect.Value {
 	// Make the value addressable if it's not already
 	// This is crucial for properly handling embedded unexported structs
@@ -145,23 +164,7 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 				if srcValue.CanAddr() {
 					// First check if this field should be filtered
 					tagValue := f.Tag.Get(x.tagKey)
-					shouldRedact := false
-					for _, filter := range x.filters {
-						// Now supports value-based filtering for unexported fields
-						if applyCensorWithValue(filter.censor, f.Name, srcValue, tagValue) {
-							shouldRedact = true
-							// Field should be redacted
-							dst := reflect.New(srcValue.Type())
-							if !filter.redactors.Redact(srcValue, dst) {
-								_ = x.defaultRedactor(srcValue, dst)
-							}
-							// Copy the redacted value safely
-							safeCopyValue(dstValue, dst.Elem())
-							break
-						}
-					}
-
-					if shouldRedact {
+					if x.tryRedactField(f.Name, srcValue, dstValue, tagValue) {
 						continue
 					}
 
@@ -254,8 +257,24 @@ func (x *masq) clone(ctx context.Context, fieldName string, src reflect.Value, t
 							unsafeCopyValue(dstValue, copied)
 						}
 						continue
-					case reflect.Array, reflect.Interface:
-						// For complex types, recursively clone
+					case reflect.Interface:
+						// Interface types (including error) need special handling for unexported fields
+						// We cannot call src.Elem() and clone recursively because it returns a non-addressable value
+						// Instead, copy the interface value directly using unsafe
+						tagValue := f.Tag.Get(x.tagKey)
+
+						// Check if this field should be redacted
+						if x.tryRedactField(f.Name, srcValue, dstValue, tagValue) {
+							continue
+						}
+
+						// For non-redacted interface fields, copy directly
+						if srcValue.CanAddr() && dstValue.CanAddr() {
+							unsafeCopyValue(dstValue, srcValue)
+						}
+						continue
+					case reflect.Array:
+						// For array types, recursively clone
 						tagValue := f.Tag.Get(x.tagKey)
 						copied := x.clone(ctx, f.Name, srcValue, tagValue)
 						// We need to use unsafe operations to set the value
@@ -455,7 +474,6 @@ func canRedactType(t reflect.Type) bool {
 		return canRedactType(t.Elem())
 	}
 
-
 	// For struct types, always allow cloning
 	// Individual fields that cannot be redacted will become nil/zero values
 	if t.Kind() == reflect.Struct {
@@ -494,4 +512,3 @@ func canRedactType(t reflect.Type) bool {
 		return false
 	}
 }
-

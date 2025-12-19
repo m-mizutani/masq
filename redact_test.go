@@ -478,8 +478,8 @@ func TestClone(t *testing.T) {
 		gt.V(t, cloned.unexportedArray).Equal(original.unexportedArray)
 		// Unexported maps become nil for security
 		gt.Nil(t, cloned.unexportedMap)
-		// Unexported interface becomes nil for security
-		gt.Nil(t, cloned.unexportedInterface)
+		// Unexported interface is now preserved (fixed in v0.2.1+)
+		gt.V(t, cloned.unexportedInterface).Equal(original.unexportedInterface)
 		gt.V(t, fmt.Sprintf("%v", cloned.unexportedStringer)).Equal(fmt.Sprintf("%v", original.unexportedStringer))
 		// Functions and channels
 		gt.V(t, cloned.unexportedFunc).NotNil()
@@ -622,6 +622,7 @@ var fieldGroups = struct {
 		"unexportedBool", "unexportedByte", "unexportedRune",
 		"unexportedCustomString", "unexportedCustomInt", "unexportedCustomBool", "unexportedCustomStruct",
 		"unexportedPointer", "unexportedSlice", "unexportedArray",
+		"unexportedInterface",              // Added: unexported interface field with masq:"secret" tag
 		"unexportedFunc", "unexportedChan", // Functions and channels with masq:"secret" tag
 		"unexportedStringer", "unexportedStruct", "unexportedNestedPtr", "unexportedSliceStruct",
 		"unexportedContainsSecret", "unexportedContainsPassword", "unexportedContainsNothing",
@@ -653,7 +654,8 @@ var fieldGroups = struct {
 		// as they are properly redacted and detection works
 	},
 	securityNilFields: []string{
-		"unexportedMap", "unexportedInterface", "unexportedMapStruct",
+		"unexportedMap", "unexportedMapStruct",
+		// NOTE: unexportedInterface removed - now properly preserved since v0.2.1+
 	},
 	mapsWithUnexportedTypes: []string{
 		"MapUnexportedKey", "MapUnexportedValue", "MapUnexportedBoth",
@@ -705,6 +707,7 @@ func TestRedact(t *testing.T) {
 					"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
 					"unexportedRune", "unexportedCustomString", "unexportedCustomInt",
 					"unexportedSlice", "unexportedSliceStruct",
+					"unexportedInterface", // Added: unexported interface can now be cloned and redacted
 					// Functions and channels can now be redacted
 					"unexportedFunc", "unexportedChan",
 					// Content fields
@@ -911,6 +914,7 @@ func TestRedact(t *testing.T) {
 				"unexportedString", "unexportedInt", "unexportedInt64", "unexportedFloat64",
 				"unexportedRune", "unexportedCustomString", "unexportedCustomInt",
 				"unexportedSlice", "unexportedSliceStruct",
+				"unexportedInterface", // Added: unexported interface can now be cloned and redacted
 				// Functions and channels with "unexported" prefix
 				"unexportedFunc", "unexportedChan",
 				// Content fields starting with "unexported"
@@ -983,6 +987,7 @@ func TestRedact(t *testing.T) {
 					"RegexPhone", "RegexEmail", "RegexNormal",
 					"ExportedEmbeddedField", // string type from embedded struct
 					"InterfaceString",       // Interface containing a string value
+					"unexportedInterface",   // Interface containing a string value (now preserved and redacted)
 					// These structs appear redacted because their string fields are redacted
 					"ExportedCustomStruct", "ExportedInterface", "ExportedStringer",
 					"ExportedStruct", "InterfaceStruct", "Deep",
@@ -1006,7 +1011,8 @@ func TestRedact(t *testing.T) {
 				nonStringUnexported := []string{}
 				for _, field := range fieldGroups.unexportedWithSecretTag {
 					// Skip Deep - it will appear redacted because its Field is redacted
-					if field == "Deep" {
+					// Skip unexportedInterface - it contains a string value and will be redacted by WithType[string]
+					if field == "Deep" || field == "unexportedInterface" {
 						continue
 					}
 					isString := false

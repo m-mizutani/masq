@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -812,7 +813,7 @@ func TestCloneNotCloned(t *testing.T) {
 		gt.V(t, cloned.Other).Equal("other-data")
 	})
 
-	t.Run("unexported interface field becomes nil", func(t *testing.T) {
+	t.Run("unexported interface field is preserved", func(t *testing.T) {
 		type Example struct {
 			Public  interface{}
 			private interface{}
@@ -828,8 +829,8 @@ func TestCloneNotCloned(t *testing.T) {
 
 		// Exported interface field is preserved
 		gt.V(t, cloned.Public).Equal("public-data")
-		// Unexported interface field becomes nil (limitation)
-		gt.V(t, cloned.private).Equal(interface{}(nil))
+		// Unexported interface field is now preserved (fixed in v0.2.1+)
+		gt.V(t, cloned.private).Equal("private-data")
 	})
 
 	t.Run("deep nesting returns zero value", func(t *testing.T) {
@@ -1475,7 +1476,7 @@ func TestInterfaceFieldBehavior(t *testing.T) {
 		gt.V(t, cloned.Other).Equal("other-data")
 	})
 
-	t.Run("unexported interface field becomes nil", func(t *testing.T) {
+	t.Run("unexported interface field is preserved", func(t *testing.T) {
 		type Example struct {
 			Public  interface{}
 			private interface{}
@@ -1491,8 +1492,8 @@ func TestInterfaceFieldBehavior(t *testing.T) {
 
 		// Exported interface field is preserved
 		gt.V(t, cloned.Public).Equal("public-data")
-		// Unexported interface field becomes nil (limitation)
-		gt.V(t, cloned.private).Equal(interface{}(nil))
+		// Unexported interface field is now preserved (fixed in v0.2.1+)
+		gt.V(t, cloned.private).Equal("private-data")
 	})
 
 	t.Run("interface fields without filters work normally", func(t *testing.T) {
@@ -3188,5 +3189,76 @@ func TestPointerPassthroughSecurityFixes(t *testing.T) {
 		gt.V(t, resultContainer.PublicMap).NotNil()
 		gt.V(t, len(resultContainer.PublicMap)).Equal(1)
 		gt.V(t, resultContainer.PublicMap["key1"]).Equal("value1")
+	})
+}
+
+// TestUnexportedErrorField reproduces the issue where unexported error fields become nil
+// See: https://github.com/m-mizutani/masq/issues/43
+func TestUnexportedErrorField(t *testing.T) {
+	// Custom error type that wraps internal errors (similar to user's report)
+	type customError struct {
+		internal error
+		message  string
+		code     int
+	}
+
+	// Error method that relies on the internal error field
+	customErrorError := func(e *customError) string {
+		if e.internal != nil {
+			return e.internal.Error()
+		}
+		return e.message
+	}
+
+	t.Run("unexported error field should not be nil'd", func(t *testing.T) {
+		originalErr := &customError{
+			internal: errors.New("internal error message"),
+			message:  "fallback message",
+			code:     500,
+		}
+
+		// The original error should return the internal error message
+		originalErrMsg := customErrorError(originalErr)
+		gt.V(t, originalErrMsg).Equal("internal error message")
+
+		// After redaction, the error should still have the internal error
+		mask := masq.NewMasq()
+		result := mask.Redact(originalErr)
+
+		resultErr, ok := result.(*customError)
+		gt.V(t, ok).Equal(true)
+
+		// The internal error field should NOT be nil
+		resultErrMsg := customErrorError(resultErr)
+		gt.V(t, resultErrMsg).Equal("internal error message")
+		gt.V(t, resultErr.internal).NotNil()
+	})
+
+	t.Run("unexported error field with struct wrapper", func(t *testing.T) {
+		type logWrapper struct {
+			Err *customError
+		}
+
+		original := &logWrapper{
+			Err: &customError{
+				internal: errors.New("database connection failed"),
+				message:  "generic error",
+				code:     503,
+			},
+		}
+
+		originalErrMsg := customErrorError(original.Err)
+		gt.V(t, originalErrMsg).Equal("database connection failed")
+
+		mask := masq.NewMasq()
+		result := mask.Redact(original)
+
+		resultWrapper, ok := result.(*logWrapper)
+		gt.V(t, ok).Equal(true)
+		gt.V(t, resultWrapper.Err).NotNil()
+
+		resultErrMsg := customErrorError(resultWrapper.Err)
+		gt.V(t, resultErrMsg).Equal("database connection failed")
+		gt.V(t, resultWrapper.Err.internal).NotNil()
 	})
 }
