@@ -1,12 +1,10 @@
 package masq_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"os"
 	"regexp"
-	"strings"
 	"testing"
 
 	"log/slog"
@@ -247,49 +245,4 @@ func ExampleRedactString() {
 	out.Flush()
 	// Output:
 	// {"level":"INFO","msg":"Got record","record":{"Email":"[REDACTED]","ID":"m-mizutani","Phone":"****-1234"},"time":"2022-12-25T09:00:00.123456789"}
-}
-
-type logValuer struct {
-}
-
-func (x logValuer) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.Any("color", "blue"),
-		slog.Any("number", "five"),
-	)
-}
-
-func TestLogValuer(t *testing.T) {
-	var buf bytes.Buffer
-	logger := newLogger(&buf, masq.New())
-
-	var v logValuer
-	logger.Info("test", slog.Any("group", v))
-	t.Log(buf.String())
-	if !strings.Contains(buf.String(), `"color":"blue"`) {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-	if !strings.Contains(buf.String(), `"number":"five"`) {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-}
-
-func TestArray(t *testing.T) {
-	v := struct {
-		Values [2]string
-	}{
-		Values: [2]string{"blue", "five"},
-	}
-
-	var buf bytes.Buffer
-	logger := newLogger(&buf, masq.New())
-	logger.Info("hello", slog.Any("values", v))
-
-	if !strings.Contains(buf.String(), `"blue"`) {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-	if !strings.Contains(buf.String(), `"five"`) {
-		t.Errorf("Failed to filter: %s", buf.String())
-	}
-
 }

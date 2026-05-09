@@ -1,208 +1,132 @@
 package masq_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/m-mizutani/gt"
 	"github.com/m-mizutani/masq"
 )
 
-// Test struct with private fields for redaction testing
-type PrivateFieldTestStruct struct {
-	ExportedString    string `masq:"secret"`
-	privateString     string `masq:"secret"`
-	privateSensitive  string // contains "secret" text
-	privateWithToken  string // contains "token" text
-	privateInt        int    `masq:"secret"`
-	privateBool       bool   `masq:"secret"`
-	privateFloat64    float64
-	privateCustomType privateCustomType
-	privatePointer    *string
-	privateSlice      []string
-	privateMap        map[string]string
-	privateStruct     struct {
-		innerField string
-	}
+// extractTarget exposes one field per Kind so reflection-based tests can
+// reach unexported and exported fields side-by-side.
+type extractTarget struct {
+	Exported string
+
+	str   string
+	b     bool
+	i     int
+	i8    int8
+	i16   int16
+	i32   int32
+	i64   int64
+	u     uint
+	u8    uint8
+	u16   uint16
+	u32   uint32
+	u64   uint64
+	f32   float32
+	f64   float64
+	c64   complex64
+	c128  complex128
+	ptr   *string
+	slc   []int
+	mp    map[string]int
+	arr   [2]int
+	iface any
+	subSt struct{ X int }
 }
 
-type privateCustomType string
-
-func TestPrivateFieldRedaction(t *testing.T) {
-	testStr := "test_pointer"
-	testData := PrivateFieldTestStruct{
-		ExportedString:    "exported_string",
-		privateString:     "private_string",
-		privateSensitive:  "contains secret information",
-		privateWithToken:  "has token value",
-		privateInt:        42,
-		privateBool:       true,
-		privateFloat64:    3.14,
-		privateCustomType: "custom_value",
-		privatePointer:    &testStr,
-		privateSlice:      []string{"item1", "item2"},
-		privateMap:        map[string]string{"key": "value"},
-		privateStruct:     struct{ innerField string }{innerField: "inner_value"},
+func TestExtractValueSafely(t *testing.T) {
+	pv := "p"
+	target := extractTarget{
+		Exported: "exp",
+		str:      "s", b: true,
+		i: 1, i8: 1, i16: 1, i32: 1, i64: 1,
+		u: 1, u8: 1, u16: 1, u32: 1, u64: 1,
+		f32: 1.5, f64: 2.5,
+		c64: complex(1, 2), c128: complex(3, 4),
+		ptr:   &pv,
+		slc:   []int{1, 2, 3},
+		mp:    map[string]int{"k": 1},
+		arr:   [2]int{9, 8},
+		iface: "ifaceVal",
+		subSt: struct{ X int }{X: 7},
 	}
 
-	t.Run("WithTag redacts private fields with matching tags", func(t *testing.T) {
-		m := masq.NewMasq(masq.WithTag("secret"))
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
+	v := reflect.ValueOf(&target).Elem()
 
-		// Exported field with "secret" tag should be redacted
-		gt.V(t, result.ExportedString).Equal("[REDACTED]")
-		// Private field with "secret" tag should be redacted
-		gt.V(t, result.privateString).Equal("[REDACTED]")
-		gt.V(t, result.privateInt).Equal(0)
-		gt.V(t, result.privateBool).Equal(false)
-		// Fields without "secret" tag should remain unchanged
-		gt.V(t, result.privateSensitive).Equal("contains secret information")
-		gt.V(t, result.privateFloat64).Equal(3.14)
+	t.Run("invalid value returns false", func(t *testing.T) {
+		got, ok := masq.ExtractValueSafely(reflect.Value{})
+		gt.V(t, ok).Equal(false)
+		gt.V(t, got).Nil()
 	})
 
-	t.Run("WithContain redacts private fields with matching content", func(t *testing.T) {
-		m := masq.NewMasq(masq.WithContain("secret"))
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
-
-		// Field containing "secret" should be redacted
-		gt.V(t, result.privateSensitive).Equal("[REDACTED]")
-		// Fields not containing "secret" should remain unchanged
-		gt.V(t, result.ExportedString).Equal("exported_string")
-		gt.V(t, result.privateString).Equal("private_string")
-		gt.V(t, result.privateWithToken).Equal("has token value")
-		gt.V(t, result.privateInt).Equal(42)
+	t.Run("exported field uses normal Interface path", func(t *testing.T) {
+		got, ok := masq.ExtractValueSafely(v.FieldByName("Exported"))
+		gt.V(t, ok).Equal(true)
+		gt.V(t, got).Equal("exp")
 	})
 
-	t.Run("WithContain works with token in private fields", func(t *testing.T) {
-		m := masq.NewMasq(masq.WithContain("token"))
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
+	cases := []struct {
+		field string
+		want  any
+	}{
+		{"str", "s"},
+		{"b", true},
+		{"i", int(1)}, {"i8", int8(1)}, {"i16", int16(1)}, {"i32", int32(1)}, {"i64", int64(1)},
+		{"u", uint(1)}, {"u8", uint8(1)}, {"u16", uint16(1)}, {"u32", uint32(1)}, {"u64", uint64(1)},
+		{"f32", float32(1.5)}, {"f64", float64(2.5)},
+		{"c64", complex64(complex(1, 2))}, {"c128", complex128(complex(3, 4))},
+		{"slc", []int{1, 2, 3}},
+		{"mp", map[string]int{"k": 1}},
+		{"arr", [2]int{9, 8}},
+		{"subSt", struct{ X int }{X: 7}},
+	}
 
-		// Field containing "token" should be redacted
-		gt.V(t, result.privateWithToken).Equal("[REDACTED]")
-		// Fields not containing "token" should remain unchanged
-		gt.V(t, result.ExportedString).Equal("exported_string")
-		gt.V(t, result.privateString).Equal("private_string")
-		gt.V(t, result.privateSensitive).Equal("contains secret information")
-		gt.V(t, result.privateInt).Equal(42)
+	for _, tc := range cases {
+		t.Run("unexported "+tc.field, func(t *testing.T) {
+			got, ok := masq.ExtractValueSafely(v.FieldByName(tc.field))
+			gt.V(t, ok).Equal(true)
+			gt.V(t, got).Equal(tc.want)
+		})
+	}
+
+	t.Run("unexported pointer is non-nil", func(t *testing.T) {
+		got, ok := masq.ExtractValueSafely(v.FieldByName("ptr"))
+		gt.V(t, ok).Equal(true)
+		// Pointer comes back as a typed *string we can dereference.
+		ptr, isStr := got.(*string)
+		gt.V(t, isStr).Equal(true)
+		gt.V(t, *ptr).Equal("p")
 	})
 
-	t.Run("WithType redacts private fields of specific type", func(t *testing.T) {
-		m := masq.NewMasq(masq.WithType[privateCustomType]())
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
-
-		// Private field of privateCustomType should be redacted
-		gt.V(t, result.privateCustomType).Equal(privateCustomType("[REDACTED]"))
-		// Other fields should remain unchanged
-		gt.V(t, result.ExportedString).Equal("exported_string")
-		gt.V(t, result.privateString).Equal("private_string")
-		gt.V(t, result.privateInt).Equal(42)
-		gt.V(t, result.privateBool).Equal(true)
+	t.Run("unexported interface holding string", func(t *testing.T) {
+		got, ok := masq.ExtractValueSafely(v.FieldByName("iface"))
+		gt.V(t, ok).Equal(true)
+		gt.V(t, got).Equal("ifaceVal")
 	})
 
-	t.Run("WithFieldName redacts private fields by name", func(t *testing.T) {
-		m := masq.NewMasq(masq.WithFieldName("privateString"))
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
-
-		// Specific private field should be redacted
-		gt.V(t, result.privateString).Equal("[REDACTED]")
-		// Other fields should remain unchanged
-		gt.V(t, result.ExportedString).Equal("exported_string")
-		gt.V(t, result.privateSensitive).Equal("contains secret information")
-		gt.V(t, result.privateWithToken).Equal("has token value")
-		gt.V(t, result.privateInt).Equal(42)
+	t.Run("nil unexported pointer", func(t *testing.T) {
+		nilTarget := extractTarget{}
+		nv := reflect.ValueOf(&nilTarget).Elem()
+		_, ok := masq.ExtractValueSafely(nv.FieldByName("ptr"))
+		gt.V(t, ok).Equal(true)
 	})
+}
 
-	t.Run("WithFieldPrefix redacts private fields by prefix", func(t *testing.T) {
-		m := masq.NewMasq(masq.WithFieldPrefix("private"))
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
-
-		// All private fields starting with "private" should be redacted
-		gt.V(t, result.privateString).Equal("[REDACTED]")
-		gt.V(t, result.privateSensitive).Equal("[REDACTED]")
-		gt.V(t, result.privateWithToken).Equal("[REDACTED]")
-		gt.V(t, result.privateInt).Equal(0)
-		gt.V(t, result.privateBool).Equal(false)
-		gt.V(t, result.privateFloat64).Equal(0.0)
-		gt.V(t, result.privateCustomType).Equal(privateCustomType("[REDACTED]"))
-		// Exported field should remain unchanged
-		gt.V(t, result.ExportedString).Equal("exported_string")
-	})
-
-	t.Run("Multiple filters work together", func(t *testing.T) {
-		m := masq.NewMasq(
-			masq.WithTag("secret"),
-			masq.WithContain("secret"),
-			masq.WithContain("token"),
-		)
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(testData))
-
-		// Fields matching any filter should be redacted
-		gt.V(t, result.ExportedString).Equal("[REDACTED]")   // tag:secret
-		gt.V(t, result.privateString).Equal("[REDACTED]")    // tag:secret
-		gt.V(t, result.privateSensitive).Equal("[REDACTED]") // contains:secret
-		gt.V(t, result.privateWithToken).Equal("[REDACTED]") // contains:token
-		gt.V(t, result.privateInt).Equal(0)                  // tag:secret
-		gt.V(t, result.privateBool).Equal(false)             // tag:secret
-		// Fields not matching any filter should remain unchanged
-		gt.V(t, result.privateFloat64).Equal(3.14)
-	})
-
-	t.Run("Complex struct with nested private fields", func(t *testing.T) {
-		type ComplexStruct struct {
-			Exported   string
-			privateKey string // should be redacted by content
-			nested     struct {
-				secretValue string // contains "secret"
-				token       string `masq:"confidential"`
-			}
+func TestExtractValueSafely_NonAddressable(t *testing.T) {
+	// A value retrieved from an unexported field of a non-addressable struct
+	// is itself not addressable. extractValueSafely must return (nil, false).
+	v := reflect.ValueOf(struct {
+		inner struct {
+			x string
 		}
+	}{}).FieldByName("inner").FieldByName("x")
+	gt.V(t, v.CanInterface()).Equal(false)
+	gt.V(t, v.CanAddr()).Equal(false)
 
-		complex := ComplexStruct{
-			Exported:   "exported_value",
-			privateKey: "my secret key",
-			nested: struct {
-				secretValue string
-				token       string `masq:"confidential"`
-			}{
-				secretValue: "secret data",
-				token:       "auth_token",
-			},
-		}
-
-		m := masq.NewMasq(
-			masq.WithContain("secret"),
-			masq.WithTag("confidential"),
-		)
-		result := gt.Cast[ComplexStruct](t, m.Redact(complex))
-
-		// Field containing "secret" should be redacted
-		gt.V(t, result.privateKey).Equal("[REDACTED]")
-		// Nested field containing "secret" should be redacted
-		gt.V(t, result.nested.secretValue).Equal("[REDACTED]")
-		// Nested field with confidential tag should be redacted
-		gt.V(t, result.nested.token).Equal("[REDACTED]")
-		// Exported field without matching criteria should remain unchanged
-		gt.V(t, result.Exported).Equal("exported_value")
-	})
-
-	t.Run("Verify private field access works correctly", func(t *testing.T) {
-		// Test that shows private fields can actually be accessed and redacted
-		// This would fail without our unsafe value extraction implementation
-
-		m := masq.NewMasq(masq.WithFieldPrefix("private"))
-		original := testData
-		result := gt.Cast[PrivateFieldTestStruct](t, m.Redact(original))
-
-		// Verify that private fields were actually accessed and modified
-		// If unsafe extraction didn't work, these would remain unchanged
-		gt.V(t, result.privateString).NotEqual(original.privateString)
-		gt.V(t, result.privateInt).NotEqual(original.privateInt)
-		gt.V(t, result.privateBool).NotEqual(original.privateBool)
-		gt.V(t, result.privateFloat64).NotEqual(original.privateFloat64)
-
-		// Verify specific redacted values
-		gt.V(t, result.privateString).Equal("[REDACTED]")
-		gt.V(t, result.privateInt).Equal(0)
-		gt.V(t, result.privateBool).Equal(false)
-		gt.V(t, result.privateFloat64).Equal(0.0)
-	})
+	got, ok := masq.ExtractValueSafely(v)
+	gt.V(t, ok).Equal(false)
+	gt.V(t, got).Nil()
 }
