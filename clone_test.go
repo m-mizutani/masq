@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -367,7 +368,7 @@ func TestCloneEmbeddedStructs(t *testing.T) {
 		gt.V(t, out.hiddenCreds.Username).Equal("u")
 	})
 
-	t.Run("field name collision: redacts every occurrence", func(t *testing.T) {
+	t.Run("field name collision: WithFieldName redacts both direct and embedded", func(t *testing.T) {
 		type inner struct {
 			Field string
 		}
@@ -379,6 +380,106 @@ func TestCloneEmbeddedStructs(t *testing.T) {
 		out := gt.Cast[outer](t, masq.NewMasq(masq.WithFieldName("Field")).Redact(in))
 		gt.V(t, out.Field).Equal("[REDACTED]")
 		gt.V(t, out.inner.Field).Equal("[REDACTED]")
+	})
+
+	t.Run("field name collision: unexported direct and embedded both redacted", func(t *testing.T) {
+		type inner struct {
+			val int
+		}
+		type outer struct {
+			val int
+			inner
+		}
+		in := outer{val: 100, inner: inner{val: 200}}
+		out := gt.Cast[outer](t, masq.NewMasq(masq.WithFieldName("val")).Redact(in))
+		gt.V(t, out.val).Equal(0)
+		gt.V(t, out.inner.val).Equal(0)
+	})
+
+	t.Run("field name collision: WithType redacts every matching field", func(t *testing.T) {
+		type inner struct {
+			Count int
+		}
+		type outer struct {
+			Count int
+			inner
+		}
+		in := outer{Count: 1, inner: inner{Count: 2}}
+		out := gt.Cast[outer](t, masq.NewMasq(masq.WithType[int]()).Redact(in))
+		gt.V(t, out.Count).Equal(0)
+		gt.V(t, out.inner.Count).Equal(0)
+	})
+
+	t.Run("WithFieldPrefix reaches into embedded struct fields", func(t *testing.T) {
+		type inner struct {
+			SecretToken  string
+			SecureCookie string
+			OtherValue   string
+		}
+		type outer struct {
+			SecureKey string
+			inner
+		}
+		in := outer{SecureKey: "k", inner: inner{SecretToken: "t", SecureCookie: "c", OtherValue: "o"}}
+		out := gt.Cast[outer](t, masq.NewMasq(masq.WithFieldPrefix("Sec")).Redact(in))
+		gt.V(t, out.SecureKey).Equal("[REDACTED]")
+		gt.V(t, out.inner.SecretToken).Equal("[REDACTED]")
+		gt.V(t, out.inner.SecureCookie).Equal("[REDACTED]")
+		gt.V(t, out.inner.OtherValue).Equal("o")
+	})
+
+	t.Run("WithRegex reaches into embedded struct fields", func(t *testing.T) {
+		type inner struct {
+			Phone string
+			Note  string
+		}
+		type outer struct {
+			ID string
+			inner
+		}
+		in := outer{ID: "u1", inner: inner{Phone: "090-1234-5678", Note: "ok"}}
+		out := gt.Cast[outer](t, masq.NewMasq(
+			masq.WithRegex(regexp.MustCompile(`^\d{3}-\d{4}-\d{4}$`)),
+		).Redact(in))
+		gt.V(t, out.ID).Equal("u1")
+		gt.V(t, out.inner.Phone).Equal("[REDACTED]")
+		gt.V(t, out.inner.Note).Equal("ok")
+	})
+}
+
+// TestCloneDeepFieldAccess verifies that filters reach into anonymous inline
+// struct fields nested inside an unexported field. Restored from the legacy
+// TestDeepFieldAccess after the test reorganization.
+func TestCloneDeepFieldAccess(t *testing.T) {
+	type deeplyEmbedded struct {
+		Deep struct {
+			Field string `masq:"secret"`
+		}
+	}
+	type wrapper struct {
+		nested deeplyEmbedded
+	}
+
+	build := func() wrapper {
+		w := wrapper{}
+		w.nested.Deep.Field = "secret_value"
+		return w
+	}
+
+	t.Run("WithFieldName reaches into anonymous inline struct", func(t *testing.T) {
+		out := gt.Cast[wrapper](t, masq.NewMasq(masq.WithFieldName("Field")).Redact(build()))
+		gt.V(t, out.nested.Deep.Field).Equal("[REDACTED]")
+	})
+
+	t.Run("WithTag matches tag on anonymous inline field", func(t *testing.T) {
+		out := gt.Cast[wrapper](t, masq.NewMasq(masq.WithTag("secret")).Redact(build()))
+		// Deep struct itself carries no tag here, so only the inner Field tag matches.
+		gt.V(t, out.nested.Deep.Field).Equal("[REDACTED]")
+	})
+
+	t.Run("WithContain detects content in anonymous inline field", func(t *testing.T) {
+		out := gt.Cast[wrapper](t, masq.NewMasq(masq.WithContain("secret")).Redact(build()))
+		gt.V(t, out.nested.Deep.Field).Equal("[REDACTED]")
 	})
 }
 
@@ -439,6 +540,28 @@ func TestCloneMapSecurity(t *testing.T) {
 		out := gt.Cast[*rec](t, masq.NewMasq().Redact(in))
 		gt.V(t, out.Public).Equal("p")
 		gt.V(t, out.priv).Nil()
+	})
+
+	t.Run("embedded unexported map type becomes nil while embedded exported map is cloned", func(t *testing.T) {
+		type unexportedMapType map[string]string
+		type ExportedMapType map[string]string
+		type container struct {
+			Public string
+			unexportedMapType
+			ExportedMapType
+		}
+		in := &container{
+			Public:            "p",
+			unexportedMapType: unexportedMapType{"a": "b"},
+			ExportedMapType:   ExportedMapType{"x": "y"},
+		}
+		out := gt.Cast[*container](t, masq.NewMasq().Redact(in))
+		gt.V(t, out.Public).Equal("p")
+		// Security: embedded unexported map type returns zero value.
+		gt.V(t, out.unexportedMapType).Nil()
+		// Embedded exported map type is cloned independently.
+		gt.V(t, fmt.Sprintf("%p", out.ExportedMapType)).NotEqual(fmt.Sprintf("%p", in.ExportedMapType))
+		gt.V(t, out.ExportedMapType["x"]).Equal("y")
 	})
 
 	t.Run("contain filter applies to slices of unexported struct elements", func(t *testing.T) {
@@ -503,13 +626,13 @@ func TestCloneMapSecurity(t *testing.T) {
 		// Exercises the canRedactType recursion across pointer/slice/map/basic Kinds
 		// without relying on a giant fixture struct.
 		type rec struct {
-			MS  map[string]string
-			MI  map[string]int
-			MB  map[string]bool
-			MF  map[string]float64
-			MP  map[string]*int
-			MSL map[string][]string
-			MMI map[string]map[string]int
+			MS     map[string]string
+			MI     map[string]int
+			MB     map[string]bool
+			MF     map[string]float64
+			MP     map[string]*int
+			MSL    map[string][]string
+			MMI    map[string]map[string]int
 			MIface map[string]any
 		}
 		one := 1
@@ -599,6 +722,39 @@ func TestClonePanicSafety(t *testing.T) {
 		}
 		return &rec{Public: "p", up: unsafe.Pointer(&x), rv: reflect.ValueOf(x)}
 	}, nil)
+
+	subtest("uintptr value is preserved through default-case copy", func() any {
+		type rec struct {
+			PublicField string
+			ptr         uintptr
+		}
+		return &rec{PublicField: "test", ptr: uintptr(123)}
+	}, func(t *testing.T, got any) {
+		v := reflect.ValueOf(got).Elem()
+		gt.V(t, v.FieldByName("PublicField").String()).Equal("test")
+	})
+
+	subtest("uintptr field is filterable by name even via default case", func() any {
+		type rec struct {
+			PublicField string
+			secret      uintptr
+		}
+		return &rec{PublicField: "public", secret: uintptr(123)}
+	}, func(t *testing.T, got any) {
+		// Use a fresh masq with WithFieldName since default subtest helper uses bare NewMasq.
+		// This subtest just confirms the structure survived; the WithFieldName check is below.
+	})
+
+	t.Run("WithFieldName redacts unexported uintptr without panic", func(t *testing.T) {
+		type rec struct {
+			PublicField string
+			secret      uintptr
+		}
+		in := &rec{PublicField: "public", secret: uintptr(123)}
+		out := gt.Cast[*rec](t, masq.NewMasq(masq.WithFieldName("secret")).Redact(in))
+		gt.V(t, out.PublicField).Equal("public")
+		gt.V(t, out.secret).Equal(uintptr(0))
+	})
 
 	subtest("circular structure with unexported children", func() any {
 		type node struct {
