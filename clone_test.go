@@ -330,6 +330,37 @@ func TestCloneUnexportedFields(t *testing.T) {
 		gt.V(t, out.Pub).Equal("p")
 		gt.V(t, out.priv.val).Equal("[REDACTED]")
 	})
+
+	t.Run("unexported pointer field preserves the pointee", func(t *testing.T) {
+		// Regression for the legacy TestCloneUnexportedPointer: a struct with
+		// an unexported *T field should be cloned with the pointee values
+		// intact. Exercises the reflect.Ptr branch of extractValueSafely.
+		type child struct {
+			Name string
+		}
+		type rec struct {
+			c *child
+		}
+		in := &rec{c: &child{Name: "orange"}}
+		out := gt.Cast[*rec](t, masq.NewMasq(masq.WithContain("blue")).Redact(in))
+		gt.V(t, out.c).NotNil()
+		gt.V(t, out.c.Name).Equal("orange")
+	})
+
+	t.Run("unexported pointer field redacts via WithContain on pointee", func(t *testing.T) {
+		// The pointer is unexported, but the pointee's exported field should
+		// still be reachable for filters that operate on string content.
+		type child struct {
+			Name string
+		}
+		type rec struct {
+			c *child
+		}
+		in := &rec{c: &child{Name: "blue value"}}
+		out := gt.Cast[*rec](t, masq.NewMasq(masq.WithContain("blue")).Redact(in))
+		gt.V(t, out.c).NotNil()
+		gt.V(t, out.c.Name).Equal("[REDACTED]")
+	})
 }
 
 func TestCloneEmbeddedStructs(t *testing.T) {
