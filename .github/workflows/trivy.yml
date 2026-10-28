@@ -22,15 +22,13 @@ jobs:
           ref: ${{ github.head_ref }}
       - id: scan
         name: Run Trivy vulnerability scanner in repo mode
-        uses: aquasecurity/trivy-action@f3d98514b056d8c71a3552e8328c225bc7f6f353 # master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: "fs"
           ignore-unfixed: true
           format: "sarif"
           output: "trivy-results.sarif"
           exit-code: 1
-        env:
-          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
 
       - name: Upload Trivy scan results to GitHub Security tab
         if: failure() && steps.scan.outcome == 'failure'
